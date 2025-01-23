@@ -15,8 +15,8 @@ use bevy_common_assets::ron::RonAssetPlugin;
 use camera::CameraPlugin;
 use economy::EconomyPlugin;
 use placement::PlacementPlugin;
-use rand::seq::IteratorRandom;
-use rand::Rng;
+use rand::seq::{IteratorRandom, SliceRandom};
+use rand::{thread_rng, Rng};
 use roll::RollPlugin;
 use std::f32::consts::PI;
 use std::time::Duration;
@@ -200,31 +200,64 @@ impl DynamicAssetCollection for AssetCollections {
 #[derive(Default, Component)]
 struct Goal;
 
-#[derive(Resource, Debug, Clone, PartialEq, Reflect)]
+#[derive(Resource, Debug, Clone, PartialEq, Copy, Reflect)]
 #[reflect(Resource)]
 struct DieFace {
     primary_type: BaseElementType,
     rarity: Rarity,
 }
 
-impl std::fmt::Display for DieFace {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // write the primary type
-        write!(
-            f,
-            "{}",
-            match self.primary_type {
-                BaseElementType::None => "None",
-                BaseElementType::Fire => "Fire",
-                BaseElementType::Water => "Water",
-                BaseElementType::Earth => "Earth",
-                BaseElementType::Wind => "Wind",
+impl DieFace {
+    pub fn new(primary_type: BaseElementType, rarity: Rarity) -> Self {
+        DieFace {
+            primary_type,
+            rarity,
+        }
+    }
+
+    pub fn generate(base_element: BaseElementType, base_rarity: Rarity) -> Self {
+        let mut rng = thread_rng();
+
+        // chance to change element type
+        let final_element = if rng.gen_bool(0.25) {
+            let elements = [
+                BaseElementType::Earth,
+                BaseElementType::Fire,
+                BaseElementType::Water,
+                BaseElementType::Wind,
+            ];
+            // Keep rolling until we get a different element
+            loop {
+                let new_element = *elements.choose(&mut rng).unwrap();
+                if new_element != base_element {
+                    break new_element;
+                }
             }
-        )
+        } else {
+            base_element
+        };
+
+        // chance to upgrade rarity
+        let final_rarity = if rng.gen_bool(0.05) {
+            match base_rarity {
+                Rarity::Common => Rarity::Uncommon,
+                Rarity::Uncommon => Rarity::Rare,
+                Rarity::Rare => Rarity::Epic,
+                Rarity::Epic => Rarity::Unique,
+                Rarity::Unique => Rarity::Unique,
+            }
+        } else {
+            base_rarity
+        };
+
+        DieFace {
+            primary_type: final_element,
+            rarity: final_rarity,
+        }
     }
 }
 
-#[derive(Resource, serde::Deserialize, Default, Debug, Clone, PartialEq, Reflect)]
+#[derive(Resource, serde::Deserialize, Default, Debug, Clone, Copy, PartialEq, Reflect)]
 #[reflect(Resource)]
 pub enum BaseElementType {
     #[default]
@@ -235,9 +268,22 @@ pub enum BaseElementType {
     Wind,  // Movement and agility
 }
 
-#[derive(Resource, Debug, Clone, PartialEq, Reflect)]
+impl std::fmt::Display for BaseElementType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BaseElementType::None => write!(f, "None"),
+            BaseElementType::Fire => write!(f, "Fire"),
+            BaseElementType::Water => write!(f, "Water"),
+            BaseElementType::Earth => write!(f, "Earth"),
+            BaseElementType::Wind => write!(f, "Wind"),
+        }
+    }
+}
+
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Reflect)]
 #[reflect(Resource)]
 enum Rarity {
+    #[default]
     Common,
     Uncommon,
     Rare,
@@ -255,7 +301,7 @@ struct DieRolledEvent(DieFace);
 #[reflect(Resource)]
 struct Die {
     // the faces of the die
-    faces: [DieFace; 6],
+    faces: Vec<DieFace>,
     // the current monetary value of the die
     value: usize,
 }
@@ -263,53 +309,38 @@ struct Die {
 impl Die {
     fn roll(&self) -> DieFace {
         let mut rng = rand::thread_rng();
-        let face = rng.gen_range(0..6);
+        let face = rng.gen_range(0..self.faces.len());
         self.faces[face].clone()
     }
 }
 
-impl std::fmt::Display for Die {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Die with faces: {},{},{},{},{},{}",
-            self.faces[0],
-            self.faces[1],
-            self.faces[2],
-            self.faces[3],
-            self.faces[4],
-            self.faces[5]
-        )
-    }
-}
-
 struct DieBuilder {
-    faces: [DieFace; 6],
+    base_face: DieFace,
+    size: usize,
 }
 
 impl DieBuilder {
-    pub fn from_type(selected_type: BaseElementType) -> Self {
-        let face = DieFace {
-            primary_type: selected_type,
-            rarity: Rarity::Common, // todo: make this random
-        };
+    pub fn from_d6_type(selected_type: BaseElementType) -> Self {
         DieBuilder {
-            faces: [
-                face.clone(),
-                face.clone(),
-                face.clone(),
-                face.clone(),
-                face.clone(),
-                face,
-            ],
+            base_face: DieFace::new(selected_type, Rarity::Common),
+            size: 6,
         }
     }
 
     fn build(self) -> Die {
-        Die {
-            faces: self.faces,
-            value: 20,
+        let mut faces = Vec::new();
+        for _ in 0..self.size {
+            faces.push(DieFace::generate(
+                self.base_face.primary_type,
+                self.base_face.rarity,
+            ));
         }
+
+        // the value should;
+        // have a base value depending on number of faces
+        // grow with the rarity on each face
+
+        Die { faces, value: 20 }
     }
 }
 

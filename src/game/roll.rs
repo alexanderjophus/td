@@ -3,7 +3,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{DiePool, DieRolledEvent, GamePlayState};
+use super::{Die, DiePool, DieRolledEvent, GamePlayState};
 
 pub struct RollPlugin;
 
@@ -15,7 +15,7 @@ impl Plugin for RollPlugin {
             .add_systems(OnEnter(GamePlayState::Rolling), rolling_setup)
             .add_systems(
                 Update,
-                (handle_input, display_die_pool)
+                (handle_input, update_die_selection)
                     .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Rolling))),
             )
             .add_systems(
@@ -57,8 +57,8 @@ impl RollAction {
         input_map.insert(Self::Placement, GamepadButton::South);
 
         // Default kbm input bindings
-        input_map.insert(Self::HighlightLeft, KeyCode::KeyQ);
-        input_map.insert(Self::HighlightRight, KeyCode::KeyE);
+        input_map.insert(Self::HighlightLeft, KeyCode::ArrowLeft);
+        input_map.insert(Self::HighlightRight, KeyCode::ArrowRight);
         input_map.insert(Self::Roll, KeyCode::Space);
         input_map.insert(Self::Placement, KeyCode::Enter);
 
@@ -69,9 +69,45 @@ impl RollAction {
 #[derive(Component)]
 struct DieRollingOverlay;
 
-fn rolling_setup(mut commands: Commands) {
-    // Root node
-    commands.spawn((Text::default(), DieRollingOverlay));
+#[derive(Component)]
+struct DieItem {
+    die: Die,
+}
+
+fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                top: Val::Percent(60.),
+                ..default()
+            },
+            DieRollingOverlay,
+        ))
+        .with_children(|parent| {
+            for die in die_pool.dice.iter() {
+                let mut n = parent.spawn((
+                    Node {
+                        width: Val::Percent(20.),
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(if die == &die_pool.dice[die_pool.highlighted] {
+                        Color::srgba(0., 0., 0., 0.5)
+                    } else {
+                        Color::srgba(0., 0., 0., 0.8)
+                    }),
+                    DieItem { die: die.clone() },
+                ));
+                for face in die.faces.iter() {
+                    n.with_child((Node::default(), Text::new(face.primary_type.to_string())));
+                }
+            }
+        });
 }
 
 fn handle_input(
@@ -90,8 +126,12 @@ fn handle_input(
     }
 
     if action_state.just_pressed(&RollAction::Roll) {
+        if die_pool.dice.len() == 0 {
+            return;
+        }
         let face = die_pool.roll();
         ev_rolled.send(DieRolledEvent(face));
+        die_pool.highlighted = 0;
     }
 
     if action_state.just_pressed(&RollAction::Placement) {
@@ -99,22 +139,15 @@ fn handle_input(
     }
 }
 
-fn display_die_pool(die_pool: Res<DiePool>, mut query: Query<(&mut Text, &DieRollingOverlay)>) {
-    for (mut text, _) in query.iter_mut() {
-        text.0 = format!(
-            "Die Pool\n\n{}",
-            die_pool
-                .dice
-                .iter()
-                .enumerate()
-                .map(|(i, die)| {
-                    if i == die_pool.highlighted {
-                        format!("> {}\n", die)
-                    } else {
-                        format!("  {}\n", die)
-                    }
-                })
-                .collect::<String>()
-        );
+fn update_die_selection(
+    die_pool: Res<DiePool>,
+    mut query: Query<(&mut BackgroundColor, &DieItem)>,
+) {
+    for (mut bg, item) in query.iter_mut() {
+        *bg = BackgroundColor(if item.die == die_pool.dice[die_pool.highlighted] {
+            Color::srgba(0., 0., 0., 0.5)
+        } else {
+            Color::srgba(0., 0., 0., 0.8)
+        });
     }
 }

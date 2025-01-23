@@ -1,9 +1,12 @@
-use bevy::prelude::*;
+use bevy::{
+    color::palettes::css::{BLUE, GREEN, ORANGE, PURPLE, WHITE},
+    prelude::*,
+};
 use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{BaseElementType, Die, DieBuilder, DiePurchaseEvent, GamePlayState};
+use super::{BaseElementType, Die, DieBuilder, DiePurchaseEvent, GamePlayState, Rarity};
 
 pub struct EconomyPlugin;
 
@@ -16,16 +19,16 @@ impl Plugin for EconomyPlugin {
             .insert_resource(DieShop {
                 highlighted: 0,
                 items: vec![
-                    DieBuilder::from_type(BaseElementType::Fire).build(),
-                    DieBuilder::from_type(BaseElementType::Water).build(),
-                    DieBuilder::from_type(BaseElementType::Earth).build(),
-                    DieBuilder::from_type(BaseElementType::Wind).build(),
+                    DieBuilder::from_d6_type(BaseElementType::Fire).build(),
+                    DieBuilder::from_d6_type(BaseElementType::Water).build(),
+                    DieBuilder::from_d6_type(BaseElementType::Earth).build(),
+                    DieBuilder::from_d6_type(BaseElementType::Wind).build(),
                 ],
             })
             .add_systems(OnEnter(GameState::Game), economy_setup)
             .add_systems(
                 Update,
-                (choose_die, display_shop, start_rolling)
+                (choose_die, update_shop_ui, start_rolling, update_economy_ui)
                     .run_if(in_state(GamePlayState::Economy).and(in_state(GameState::Game))),
             )
             .add_systems(
@@ -67,8 +70,8 @@ impl EconomyAction {
         input_map.insert(Self::PlacementPhase, GamepadButton::South);
 
         // Default kbm input bindings
-        input_map.insert(Self::ToggleDieLeft, KeyCode::KeyQ);
-        input_map.insert(Self::ToggleDieRight, KeyCode::KeyE);
+        input_map.insert(Self::ToggleDieLeft, KeyCode::ArrowLeft);
+        input_map.insert(Self::ToggleDieRight, KeyCode::ArrowRight);
         input_map.insert(Self::BuyDie, KeyCode::Space);
         input_map.insert(Self::PlacementPhase, KeyCode::Enter);
 
@@ -88,10 +91,81 @@ struct DieShop {
 }
 
 #[derive(Component)]
-pub struct DieShopOverlay;
+struct DieShopOverlay;
 
-fn economy_setup(mut commands: Commands) {
-    commands.spawn((Text::default(), DieShopOverlay));
+#[derive(Component)]
+struct DieShopItem {
+    item: Die,
+}
+
+#[derive(Component)]
+struct MoneyText;
+
+fn economy_setup(mut commands: Commands, shop: Res<DieShop>, economy: ResMut<Economy>) {
+    let mut p = commands.spawn((
+        Node {
+            width: Val::Percent(100.),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            top: Val::Percent(60.),
+            ..default()
+        },
+        DieShopOverlay,
+    ));
+    p.with_child((
+        Node {
+            width: Val::Percent(10.),
+            height: Val::Percent(10.),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
+        Text::new("Money:"),
+    ));
+    p.with_child((
+        Node {
+            width: Val::Percent(10.),
+            height: Val::Percent(10.),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
+        Text::new(economy.money.to_string()),
+        MoneyText,
+    ));
+    for item in shop.items.iter() {
+        p.with_children(|p| {
+            let mut die = p.spawn((
+                Node {
+                    width: Val::Percent(20.),
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
+                BackgroundColor(if item == &shop.items[shop.highlighted] {
+                    Color::srgba(0., 0., 0., 0.5)
+                } else {
+                    Color::srgba(0., 0., 0., 0.8)
+                }),
+                DieShopItem { item: item.clone() },
+            ));
+            for face in item.faces.iter() {
+                let color = match face.rarity {
+                    Rarity::Common => WHITE,
+                    Rarity::Uncommon => GREEN,
+                    Rarity::Rare => BLUE,
+                    Rarity::Epic => PURPLE,
+                    Rarity::Unique => ORANGE,
+                };
+                die.with_child((
+                    Node::default(),
+                    Text::new(face.primary_type.to_string()),
+                    TextColor(color.into()),
+                ));
+            }
+        });
+    }
 }
 
 fn choose_die(
@@ -117,25 +191,19 @@ fn choose_die(
     }
 }
 
-fn display_shop(
-    shop: Res<DieShop>,
-    economy: Res<Economy>,
-    mut query: Query<(&mut Text, &DieShopOverlay)>,
-) {
-    for (mut text, _) in query.iter_mut() {
-        text.0 = format!(
-            "Shop\nMoney: {}\n\n{}",
-            economy.money,
-            shop.items
-                .iter()
-                .enumerate()
-                .map(|(i, item)| {
-                    let prefix = if i == shop.highlighted { ">> " } else { "   " };
-                    format!("{}{}", prefix, item)
-                })
-                .collect::<Vec<String>>()
-                .join("\n\n")
-        );
+fn update_shop_ui(shop: ResMut<DieShop>, mut query: Query<(&mut BackgroundColor, &DieShopItem)>) {
+    for (mut bg_color, item) in query.iter_mut() {
+        if item.item == shop.items[shop.highlighted] {
+            *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5));
+        } else {
+            *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8));
+        }
+    }
+}
+
+fn update_economy_ui(economy: Res<Economy>, mut query: Query<&mut Text, With<MoneyText>>) {
+    for mut text in query.iter_mut() {
+        text.0 = economy.money.to_string();
     }
 }
 

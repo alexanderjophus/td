@@ -23,7 +23,7 @@ struct OnMenuScreen;
 fn ui(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
-    mut writer: EventWriter<AppExit>,
+    mut exit: EventWriter<AppExit>,
 ) {
     let ctx = contexts.ctx_mut();
 
@@ -43,7 +43,7 @@ fn ui(
             }
 
             if quit.clicked() {
-                writer.send(AppExit::Success);
+                exit.send(AppExit::Success);
             }
         })
     });

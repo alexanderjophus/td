@@ -9,6 +9,11 @@
             name: "Demon",
             element_type: Fire,
             model: "models/demon.glb",
+        ),
+        TowerDetailsRon (
+            name: "Faun",
+            element_type: Water,
+            model: "models/faun.glb",
         )
     ]),
     "enemies": Enemies ([
