@@ -1,5 +1,7 @@
 # td
 
+[![Release](https://github.com/alexanderjophus/td/actions/workflows/release.yaml/badge.svg)](https://github.com/alexanderjophus/td/actions/workflows/release.yaml)
+
 Started life as a pokemon tower defense game. Now it's just a tower defense game.
 
 ## Getting Started
@@ -14,30 +16,23 @@ cargo run
 
 There's a feature flag for debug `--features debug` which will show the grid and other helpful things.
 
-## Controls
-
-- `WASD` to move the camera
-- Arrow keys to move the towers
-- `Space` to place a tower
-- `T` to toggle tower choice
-- `Enter` to start the wave
-
 ## Features
 
 - Grid based system
 - Towers are obstacles the enemy must be able to navigate around
+- Moddable towers/enemies. i.e. a ron file that points to new valid glb files, with all the towers config done.
 
-### Todo list
+## Screenshots
 
-(Not in any particular order, and this may become outdated)
+These will get out of date quickly as I iterate on the game.
 
-- [ ] Towers have a base shape that is a hexomino based on a cube net. (i.e. unravel a cube into a 2D shape)
-- [ ] Pathfinding is visible during placement phase
-- [ ] Moddable towers/enemies. i.e. a ron file that points to new valid glb files, with all the towers config done.
-- [ ] Pathfinding 1.1 (disable blocking a path)
-- [ ] End of wave logic (currently crashes trying to go back to placement phase)
-- [ ] More tower types
-- [ ] More enemy types
+Splash screen
+
+<img src="docs/splash.png" alt="splash" width="200"/>
+
+Shop screen, select what die to buy.
+
+<img src="docs/shop.png" alt="shop" width="200"/>
 
 ## Credits
 
