@@ -1,9 +1,12 @@
-use bevy::prelude::*;
+use bevy::{
+    color::palettes::css::{BLUE, GREEN, ORANGE, PURPLE, WHITE},
+    prelude::*,
+};
 use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{Die, DiePool, DieRolledEvent, GamePlayState};
+use super::{Die, DiePool, DieRollResultEvent, DieRolledEvent, GamePlayState, Rarity, TowerPool};
 
 pub struct RollPlugin;
 
@@ -15,7 +18,7 @@ impl Plugin for RollPlugin {
             .add_systems(OnEnter(GamePlayState::Rolling), rolling_setup)
             .add_systems(
                 Update,
-                (handle_input, update_die_selection)
+                (handle_input, update_die_selection, update_die_result)
                     .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Rolling))),
             )
             .add_systems(
@@ -87,6 +90,13 @@ fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
             DieRollingOverlay,
         ))
         .with_children(|parent| {
+            parent.spawn((
+                Node {
+                    width: Val::Percent(40.),
+                    ..default()
+                },
+                Text::new("Rolling: Choose a die"),
+            ));
             for die in die_pool.dice.iter() {
                 let mut n = parent.spawn((
                     Node {
@@ -104,7 +114,17 @@ fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
                     DieItem { die: die.clone() },
                 ));
                 for face in die.faces.iter() {
-                    n.with_child((Node::default(), Text::new(face.primary_type.to_string())));
+                    n.with_child((
+                        Node::default(),
+                        Text::new(face.primary_type.to_string()),
+                        TextColor(match face.rarity {
+                            Rarity::Common => WHITE.into(),
+                            Rarity::Uncommon => GREEN.into(),
+                            Rarity::Rare => BLUE.into(),
+                            Rarity::Epic => PURPLE.into(),
+                            Rarity::Unique => ORANGE.into(),
+                        }),
+                    ));
                 }
             }
         });
@@ -115,6 +135,7 @@ fn handle_input(
     mut die_pool: ResMut<DiePool>,
     mut next_state: ResMut<NextState<GamePlayState>>,
     mut ev_rolled: EventWriter<DieRolledEvent>,
+    tower_pool: Res<TowerPool>,
 ) {
     if action_state.just_pressed(&RollAction::HighlightLeft) {
         die_pool.highlighted =
@@ -126,16 +147,42 @@ fn handle_input(
     }
 
     if action_state.just_pressed(&RollAction::Roll) {
-        if die_pool.dice.len() == 0 {
-            return;
+        let idx = die_pool.highlighted;
+        if die_pool.dice[idx].result.is_none() {
+            ev_rolled.send(DieRolledEvent(die_pool.dice[idx].clone()));
         }
-        let face = die_pool.roll();
-        ev_rolled.send(DieRolledEvent(face));
-        die_pool.highlighted = 0;
     }
 
     if action_state.just_pressed(&RollAction::Placement) {
+        if tower_pool.towers.len() == 0 {
+            return;
+        }
         next_state.set(GamePlayState::Placement);
+    }
+}
+
+fn update_die_result(
+    mut commands: Commands,
+    mut query: Query<(Entity, &DieItem)>,
+    mut ev_rolled: EventReader<DieRollResultEvent>,
+) {
+    for ev in ev_rolled.read() {
+        for (entity, item) in query.iter_mut() {
+            if item.die.faces == ev.0.faces {
+                commands.entity(entity).despawn_descendants();
+                commands.entity(entity).with_child((
+                    Node::default(),
+                    Text::new(ev.1.primary_type.to_string()),
+                    TextColor(match ev.1.rarity {
+                        Rarity::Common => WHITE.into(),
+                        Rarity::Uncommon => GREEN.into(),
+                        Rarity::Rare => BLUE.into(),
+                        Rarity::Epic => PURPLE.into(),
+                        Rarity::Unique => ORANGE.into(),
+                    }),
+                ));
+            }
+        }
     }
 }
 

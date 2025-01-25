@@ -55,6 +55,7 @@ impl Plugin for GamePlugin {
             .register_type::<DiePool>()
             .add_event::<DiePurchaseEvent>()
             .add_event::<DieRolledEvent>()
+            .add_event::<DieRollResultEvent>()
             .add_systems(OnEnter(GameState::Game), setup)
             .add_systems(
                 Update,
@@ -295,7 +296,10 @@ enum Rarity {
 struct DiePurchaseEvent(Die);
 
 #[derive(Event)]
-struct DieRolledEvent(DieFace);
+struct DieRolledEvent(Die);
+
+#[derive(Event)]
+struct DieRollResultEvent(Die, DieFace);
 
 #[derive(Resource, Debug, Clone, PartialEq, Reflect)]
 #[reflect(Resource)]
@@ -304,12 +308,16 @@ struct Die {
     faces: Vec<DieFace>,
     // the current monetary value of the die
     value: usize,
+    // result of the roll
+    result: Option<DieFace>,
 }
 
 impl Die {
-    fn roll(&self) -> DieFace {
+    fn roll(&mut self) -> DieFace {
         let mut rng = rand::thread_rng();
         let face = rng.gen_range(0..self.faces.len());
+        let res = self.faces[face];
+        self.result = Some(res);
         self.faces[face].clone()
     }
 }
@@ -340,7 +348,11 @@ impl DieBuilder {
         // have a base value depending on number of faces
         // grow with the rarity on each face
 
-        Die { faces, value: 20 }
+        Die {
+            faces,
+            value: 20,
+            result: None,
+        }
     }
 }
 
@@ -349,15 +361,6 @@ impl DieBuilder {
 struct DiePool {
     dice: Vec<Die>,
     highlighted: usize,
-}
-
-impl DiePool {
-    // remove the die from the pool and return the rolled face
-    fn roll(&mut self) -> DieFace {
-        let idx = self.highlighted;
-        let die = self.dice.remove(idx);
-        die.roll()
-    }
 }
 
 #[derive(Resource, Default, Debug, PartialEq)]
@@ -464,18 +467,23 @@ fn die_purchased(mut die_pool: ResMut<DiePool>, mut ev_purchased: EventReader<Di
 
 fn die_rolled(
     tower_assets: Res<Assets<TowerDetails>>,
+    mut die_pool: ResMut<DiePool>,
     mut tower_pool: ResMut<TowerPool>,
     mut ev_rolled: EventReader<DieRolledEvent>,
+    mut ev_result: EventWriter<DieRollResultEvent>,
 ) {
     for ev in ev_rolled.read() {
-        let face = ev.0.clone();
+        let mut die = ev.0.clone();
+        let face = die.roll();
+        let idx = die_pool.highlighted;
+        die_pool.dice[idx] = die.clone();
         let selected_type = face.primary_type.clone();
-        let (id, tower) = tower_assets
+        let (id, _) = tower_assets
             .iter()
             .filter(|(_, tower)| tower.element_type == selected_type)
             .choose(&mut rand::thread_rng())
             .unwrap();
-        info!("Selected tower: {}", tower.name);
         tower_pool.towers.push(id);
+        ev_result.send(DieRollResultEvent(die, face));
     }
 }

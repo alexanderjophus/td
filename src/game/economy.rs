@@ -6,7 +6,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{BaseElementType, Die, DieBuilder, DiePurchaseEvent, GamePlayState, Rarity};
+use super::{BaseElementType, Die, DieBuilder, DiePool, DiePurchaseEvent, GamePlayState, Rarity};
 
 pub struct EconomyPlugin;
 
@@ -210,8 +210,12 @@ fn update_economy_ui(economy: Res<Economy>, mut query: Query<&mut Text, With<Mon
 fn start_rolling(
     action_state: Res<ActionState<EconomyAction>>,
     mut next_state: ResMut<NextState<GamePlayState>>,
+    die_pool: Res<DiePool>,
 ) {
     if action_state.just_pressed(&EconomyAction::PlacementPhase) {
+        if die_pool.dice.len() == 0 {
+            return;
+        }
         next_state.set(GamePlayState::Rolling);
     }
 }

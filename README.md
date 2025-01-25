@@ -28,11 +28,11 @@ These will get out of date quickly as I iterate on the game.
 
 Splash screen
 
-<img src="docs/splash.png" alt="splash" width="200"/>
+<img src="docs/splash.png" alt="splash" width="800"/>
 
 Shop screen, select what die to buy.
 
-<img src="docs/shop.png" alt="shop" width="200"/>
+<img src="docs/shop.png" alt="shop" width="800"/>
 
 ## Credits
 
