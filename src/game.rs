@@ -136,7 +136,7 @@ impl DynamicAsset for CustomDynamicAsset {
                         SystemState::<ResMut<Assets<TowerDetails>>>::new(world).get_mut(world);
                     let handle = tower_details.add(TowerDetails {
                         name: tower.name.clone(),
-                        element_type: tower.element_type.clone(),
+                        element_type: tower.element_type,
                         model: model.clone(),
                     });
                     towers_collection.push(handle.untyped());
@@ -319,7 +319,7 @@ impl Die {
         let face = rng.gen_range(0..self.faces.len());
         let res = self.faces[face];
         self.result = Some(res);
-        self.faces[face].clone()
+        self.faces[face]
     }
 }
 
@@ -478,7 +478,7 @@ fn die_rolled(
         let face = die.roll();
         let idx = die_pool.highlighted;
         die_pool.dice[idx] = die.clone();
-        let selected_type = face.primary_type.clone();
+        let selected_type = face.primary_type;
         let (id, _) = tower_assets
             .iter()
             .filter(|(_, tower)| tower.element_type == selected_type)

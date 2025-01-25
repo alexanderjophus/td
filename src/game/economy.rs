@@ -213,7 +213,7 @@ fn start_rolling(
     die_pool: Res<DiePool>,
 ) {
     if action_state.just_pressed(&EconomyAction::PlacementPhase) {
-        if die_pool.dice.len() == 0 {
+        if die_pool.dice.is_empty() {
             return;
         }
         next_state.set(GamePlayState::Rolling);

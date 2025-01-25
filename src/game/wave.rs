@@ -230,7 +230,7 @@ fn target_death(
         }
     }
     for (ent, projectile) in &projectiles {
-        if let Err(_) = enemies.get(projectile.target) {
+        if enemies.get(projectile.target).is_err() {
             commands.entity(ent).despawn_recursive();
         }
     }
@@ -246,9 +246,8 @@ fn end_wave(
         wave.timer.tick(time.delta());
         if wave.timer.finished() {
             let mut all_enemies_dead = true;
-            for _ in enemy_query.iter_mut() {
+            if enemy_query.iter_mut().next().is_some() {
                 all_enemies_dead = false;
-                break;
             }
 
             if all_enemies_dead {

@@ -235,7 +235,7 @@ fn place_tower(
             MeshMaterial3d(mat),
             Tower {
                 name: tower_details.name.clone(),
-                element_type: tower_details.element_type.clone(),
+                element_type: tower_details.element_type,
                 attack_speed: Timer::from_seconds(1.0, TimerMode::Repeating),
             },
             Obstacle,

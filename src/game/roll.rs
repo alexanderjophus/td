@@ -154,7 +154,7 @@ fn handle_input(
     }
 
     if action_state.just_pressed(&RollAction::Placement) {
-        if tower_pool.towers.len() == 0 {
+        if tower_pool.towers.is_empty() {
             return;
         }
         next_state.set(GamePlayState::Placement);
