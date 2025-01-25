@@ -78,6 +78,7 @@ enum GamePlayState {
 struct Obstacle;
 
 #[derive(AssetCollection, Resource)]
+#[allow(dead_code)]
 pub struct AllAssets {
     #[asset(key = "towers", collection(typed))]
     pub towers: Vec<Handle<TowerDetails>>,
