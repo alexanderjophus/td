@@ -3,7 +3,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{BaseElementType, GamePlayState, Obstacle, TowerDetails, TowerPool, Wave, SNAP_OFFSET};
+use super::{BaseElementType, GamePlayState, TowerDetails, TowerPool, Wave, SNAP_OFFSET};
 
 pub struct PlacementPlugin;
 

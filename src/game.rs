@@ -1,10 +1,12 @@
 mod camera;
+mod dice_physics;
 mod economy;
 mod placement;
 mod roll;
 mod wave;
 
 use super::GameState;
+
 use bevy::gltf::GltfMesh;
 use bevy::math::vec2;
 use bevy::prelude::*;
@@ -12,10 +14,11 @@ use bevy::utils::{HashMap, HashSet};
 use bevy::{ecs::system::SystemState, gltf::Gltf, render::primitives::Aabb};
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
+use bevy_rapier3d::prelude::*;
 use camera::CameraPlugin;
 use economy::EconomyPlugin;
 use placement::PlacementPlugin;
-use rand::seq::{IteratorRandom, SliceRandom};
+use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use roll::RollPlugin;
 use std::f32::consts::PI;
@@ -57,10 +60,7 @@ impl Plugin for GamePlugin {
             .add_event::<DieRolledEvent>()
             .add_event::<DieRollResultEvent>()
             .add_systems(OnEnter(GameState::Game), setup)
-            .add_systems(
-                Update,
-                (die_purchased, die_rolled).run_if(in_state(GameState::Game)),
-            );
+            .add_systems(Update, (die_purchased).run_if(in_state(GameState::Game)));
     }
 }
 
@@ -313,16 +313,6 @@ struct Die {
     result: Option<DieFace>,
 }
 
-impl Die {
-    fn roll(&mut self) -> DieFace {
-        let mut rng = rand::thread_rng();
-        let face = rng.gen_range(0..self.faces.len());
-        let res = self.faces[face];
-        self.result = Some(res);
-        self.faces[face]
-    }
-}
-
 struct DieBuilder {
     base_face: DieFace,
     size: usize,
@@ -430,7 +420,8 @@ impl TowerPool {
 fn setup(
     mut commands: Commands,
     assets_gltfmesh: Res<Assets<GltfMesh>>,
-    mut assets_mesh: ResMut<Assets<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     assets_enemydetails: Res<Assets<EnemyDetails>>,
     gltfassets: Res<GltfAssets>,
     res: Res<Assets<Gltf>>,
@@ -479,7 +470,7 @@ fn setup(
 
     // spawn square placeholder for goal
     commands.spawn((
-        Mesh3d(assets_mesh.add(Rectangle::new(0.1, 1.0))),
+        Mesh3d(meshes.add(Rectangle::new(0.1, 1.0))),
         Transform::default()
             .with_translation(Vec3::new(-3.9, 0.0, -1.5))
             .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
@@ -502,6 +493,16 @@ fn setup(
         NavMeshUpdateMode::Direct,
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
     ));
+
+    // spawn floor
+    // Create a platform for the die to roll on
+    commands.spawn((
+        Mesh3d(meshes.add(Cuboid::new(100.0, 0.2, 100.0))),
+        MeshMaterial3d(materials.add(StandardMaterial::default())),
+        Transform::from_xyz(0.0, -0.1, 0.0),
+        Collider::cuboid(50.0, 0.1, 50.0),
+        RigidBody::Fixed,
+    ));
 }
 
 #[derive(Default, Component)]
@@ -512,28 +513,5 @@ struct Wave {
 fn die_purchased(mut die_pool: ResMut<DiePool>, mut ev_purchased: EventReader<DiePurchaseEvent>) {
     for ev in ev_purchased.read() {
         die_pool.dice.push(ev.0.clone());
-    }
-}
-
-fn die_rolled(
-    tower_assets: Res<Assets<TowerDetails>>,
-    mut die_pool: ResMut<DiePool>,
-    mut tower_pool: ResMut<TowerPool>,
-    mut ev_rolled: EventReader<DieRolledEvent>,
-    mut ev_result: EventWriter<DieRollResultEvent>,
-) {
-    for ev in ev_rolled.read() {
-        let mut die = ev.0.clone();
-        let face = die.roll();
-        let idx = die_pool.highlighted;
-        die_pool.dice[idx] = die.clone();
-        let selected_type = face.primary_type;
-        let (id, _) = tower_assets
-            .iter()
-            .filter(|(_, tower)| tower.element_type == selected_type)
-            .choose(&mut rand::thread_rng())
-            .unwrap();
-        tower_pool.add_tower(id);
-        ev_result.send(DieRollResultEvent(die, face));
     }
 }

@@ -6,25 +6,29 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
+use super::dice_physics::DicePhysicsPlugin;
 use super::{Die, DiePool, DieRollResultEvent, DieRolledEvent, GamePlayState, Rarity, TowerPool};
 
 pub struct RollPlugin;
 
 impl Plugin for RollPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(InputManagerPlugin::<RollAction>::default())
-            .init_resource::<ActionState<RollAction>>()
-            .insert_resource(RollAction::default_input_map())
-            .add_systems(OnEnter(GamePlayState::Rolling), rolling_setup)
-            .add_systems(
-                Update,
-                (handle_input, update_die_selection, update_die_result)
-                    .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Rolling))),
-            )
-            .add_systems(
-                OnExit(GamePlayState::Rolling),
-                despawn_screen::<DieRollingOverlay>,
-            );
+        app.add_plugins((
+            InputManagerPlugin::<RollAction>::default(),
+            DicePhysicsPlugin,
+        ))
+        .init_resource::<ActionState<RollAction>>()
+        .insert_resource(RollAction::default_input_map())
+        .add_systems(OnEnter(GamePlayState::Rolling), rolling_setup)
+        .add_systems(
+            Update,
+            (handle_input, update_die_selection, update_die_result)
+                .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Rolling))),
+        )
+        .add_systems(
+            OnExit(GamePlayState::Rolling),
+            despawn_screen::<DieRollingOverlay>,
+        );
     }
 }
 
@@ -148,7 +152,9 @@ fn handle_input(
 
     if action_state.just_pressed(&RollAction::Roll) {
         let idx = die_pool.highlighted;
+        // Only trigger the roll if there's no result yet
         if die_pool.dice[idx].result.is_none() {
+            // The physics system will handle the actual rolling
             ev_rolled.send(DieRolledEvent(die_pool.dice[idx].clone()));
         }
     }

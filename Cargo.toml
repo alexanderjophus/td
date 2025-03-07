@@ -21,3 +21,4 @@ serde = "1.0.217"
 anyhow = "1.0.95"
 vleue_navigator = { version = "0.11.1", features = ["debug-with-gizmos"] }
 rand = "0.8.5"
+bevy_rapier3d = "0.29.0"
