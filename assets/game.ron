@@ -14,7 +14,12 @@
             name: "Faun",
             element_type: Water,
             model: "models/faun.glb",
-        )
+        ),
+        TowerDetailsRon (
+            name: "Wyvern",
+            element_type: Wind,
+            model: "models/wyvern_spiny.glb",
+        ),
     ]),
     "enemies": Enemies ([
         EnemyDetailsRon (

@@ -37,7 +37,8 @@ impl Plugin for WavePlugin {
 #[derive(Reflect, Component, Default)]
 #[reflect(Component)]
 pub struct EnemySpawner {
-    pub timer: Timer,
+    pub delta: Timer,
+    pub total_time: Timer,
 }
 
 #[derive(Reflect, Component, Default)]
@@ -57,8 +58,13 @@ fn spawn_enemy(
     mut query: Query<(&mut EnemySpawner, &Transform)>,
 ) {
     for (mut spawner, transform) in query.iter_mut() {
-        spawner.timer.tick(time.delta());
-        if spawner.timer.finished() {
+        spawner.total_time.tick(time.delta());
+        if spawner.total_time.finished() {
+            return;
+        }
+
+        spawner.delta.tick(time.delta());
+        if spawner.delta.finished() {
             let enemy = assets_enemies.iter().next().unwrap().1;
             let enemy_mesh = res.get(&enemy.model).unwrap();
             let enemy_mesh_mesh = assets_gltfmesh.get(&enemy_mesh.meshes[0]).unwrap();
@@ -240,17 +246,12 @@ fn end_wave(
     mut next_state: ResMut<NextState<GamePlayState>>,
     time: Res<Time>,
     mut wave_query: Query<&mut Wave>,
-    mut enemy_query: Query<Entity, With<Enemy>>,
+    enemy_query: Query<Entity, With<Enemy>>,
 ) {
     for mut wave in wave_query.iter_mut() {
         wave.timer.tick(time.delta());
         if wave.timer.finished() {
-            let mut all_enemies_dead = true;
-            if enemy_query.iter_mut().next().is_some() {
-                all_enemies_dead = false;
-            }
-
-            if all_enemies_dead {
+            if enemy_query.is_empty() {
                 info!("Wave ended");
                 next_state.set(GamePlayState::Economy);
             }

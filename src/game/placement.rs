@@ -20,15 +20,15 @@ impl Plugin for PlacementPlugin {
                     placeholder_snap_to_cursor,
                     display_placeholder,
                     toggle_placeholder_type,
-                    place_tower,
-                    display_tower_pool,
+                    // place_tower,
+                    update_tower_selection,
                     start_wave,
                 )
                     .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Placement))),
             )
             .add_systems(
                 OnExit(GamePlayState::Placement),
-                despawn_screen::<OnPlacementOverlay>,
+                despawn_screen::<PlacementOverlay>,
             );
     }
 }
@@ -73,7 +73,7 @@ impl PlacementAction {
     }
 }
 
-#[derive(Reflect, Component)]
+#[derive(Reflect, Component, PartialEq)]
 #[reflect(Component)]
 pub struct Tower {
     pub name: String,
@@ -99,44 +99,84 @@ pub struct TowerPlaceholder;
 pub struct CursorPlaceholder;
 
 #[derive(Reflect, Component)]
-pub struct OnPlacementOverlay;
+pub struct PlacementOverlay;
 
 fn setup(
     mut commands: Commands,
-    current_tower: ResMut<TowerPool>,
+    tower_pool: ResMut<TowerPool>,
     mut assets_mesh: ResMut<Assets<Mesh>>,
-    assets_gltfmesh: ResMut<Assets<GltfMesh>>,
-    assets_towers: ResMut<Assets<TowerDetails>>,
+    assets_gltfmesh: Res<Assets<GltfMesh>>,
+    assets_towers: Res<Assets<TowerDetails>>,
     res: Res<Assets<Gltf>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // pick first tower in the list
-    // will panic, need to address in situation where there are no towers
-    let tower = current_tower.towers[current_tower.highlighted];
-    let tower_details = &assets_towers.get(tower).unwrap().model;
-    let gltf = res.get(tower_details).unwrap();
-    let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
-    let mesh3d = mesh.primitives[0].mesh.clone();
-    let mat = gltf.materials[0].clone();
-    let pink = materials.add(StandardMaterial {
-        base_color: Color::srgb(1.0, 0.0, 1.0),
+    if let Some(tower) = tower_pool.get_highlighted() {
+        let tower_details = assets_towers.get(*tower).unwrap();
+        let gltf = res.get(&tower_details.model).unwrap();
+        let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
+        let mesh3d = mesh.primitives[0].mesh.clone();
+        let mat = gltf.materials[0].clone();
+        commands.spawn((
+            Mesh3d(mesh3d),
+            MeshMaterial3d(mat),
+            Transform::default().with_translation(Vec3::new(SNAP_OFFSET, 0.0, SNAP_OFFSET)),
+            TowerPlaceholder,
+        ));
+    }
+    let blue = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.0, 0.0, 1.0),
         ..Default::default()
     });
-    commands.spawn((
-        Mesh3d(mesh3d),
-        MeshMaterial3d(mat),
-        Transform::default().with_translation(Vec3::new(SNAP_OFFSET, 0.0, SNAP_OFFSET)),
-        TowerPlaceholder,
-    ));
 
     commands.spawn((
-        Mesh3d(assets_mesh.add(Cylinder::new(0.5, 0.2))),
-        MeshMaterial3d(pink),
+        Mesh3d(assets_mesh.add(Cylinder::new(0.2, 0.05))),
+        MeshMaterial3d(blue),
         Transform::default().with_translation(Vec3::new(SNAP_OFFSET, 0.0, SNAP_OFFSET)),
         CursorPlaceholder,
     ));
 
-    commands.spawn((Text::default(), OnPlacementOverlay));
+    let mut p = commands.spawn((
+        Node {
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            top: Val::Percent(60.),
+            ..default()
+        },
+        PlacementOverlay,
+    ));
+    p.with_child((
+        Node {
+            width: Val::Percent(40.),
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
+        Text::new("Towers:"),
+    ));
+
+    for tower in tower_pool.towers.iter() {
+        let tower_details = assets_towers.get(*tower).unwrap();
+        p.with_child((
+            Node {
+                width: Val::Percent(20.),
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(if tower_pool.is_highlighted(tower) {
+                Color::srgba(0., 0., 0., 0.5)
+            } else {
+                Color::srgba(0., 0., 0., 0.8)
+            }),
+            TowerDetails {
+                name: tower_details.name.clone(),
+                element_type: tower_details.element_type,
+                model: tower_details.model.clone(),
+            },
+            Text::new(tower_details.name.clone()),
+        ));
+    }
 }
 
 fn control_cursor(
@@ -185,6 +225,23 @@ fn toggle_placeholder_type(
     }
 }
 
+fn update_tower_selection(
+    tower_pool: Res<TowerPool>,
+    assets_towers: Res<Assets<TowerDetails>>,
+    mut query: Query<(&mut BackgroundColor, &TowerDetails)>,
+) {
+    for (mut bg_color, item) in query.iter_mut() {
+        if let Some(tower) = tower_pool.get_highlighted() {
+            let tower_details = assets_towers.get(*tower).unwrap();
+            if item == tower_details {
+                *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5));
+            } else {
+                *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8));
+            }
+        }
+    }
+}
+
 fn display_placeholder(
     mut commands: Commands,
     tower_pool: ResMut<TowerPool>,
@@ -202,76 +259,49 @@ fn display_placeholder(
         });
         return;
     }
-    let tower = tower_pool.towers[tower_pool.highlighted];
-    let tower_details = &assets_towers.get(tower).unwrap().model;
-    let gltf = res.get(tower_details).unwrap();
-    let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
-    query.iter_mut().for_each(|(mut mesh3d, mut mat, _)| {
-        mesh3d.0 = mesh.primitives[0].mesh.clone();
-        mat.0 = gltf.materials[0].clone();
-    });
-}
-
-fn place_tower(
-    action_state: Res<ActionState<PlacementAction>>,
-    mut commands: Commands,
-    assets_towers: Res<Assets<TowerDetails>>,
-    res: Res<Assets<Gltf>>,
-    assets_gltfmesh: Res<Assets<GltfMesh>>,
-    mut tower_pool: ResMut<TowerPool>,
-    placeholder_query: Query<&Transform, With<TowerPlaceholder>>,
-) {
-    if action_state.just_pressed(&PlacementAction::PlaceTower) {
-        let placeholder_transform = placeholder_query.single();
-        let tower = tower_pool.towers[tower_pool.highlighted];
-        let tower_details = assets_towers.get(tower).unwrap();
+    if let Some(tower) = tower_pool.get_highlighted() {
+        let tower_details = assets_towers.get(*tower).unwrap();
         let gltf = res.get(&tower_details.model).unwrap();
         let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
-        let mesh3d = mesh.primitives[0].mesh.clone();
-        let mat = gltf.materials[0].clone();
-        commands.spawn((
-            Mesh3d(mesh3d),
-            Transform::from_translation(placeholder_transform.translation),
-            MeshMaterial3d(mat),
-            Tower {
-                name: tower_details.name.clone(),
-                element_type: tower_details.element_type,
-                attack_speed: Timer::from_seconds(1.0, TimerMode::Repeating),
-            },
-            Obstacle,
-        ));
-
-        let idx = tower_pool.highlighted;
-        tower_pool.towers.remove(idx);
+        query.iter_mut().for_each(|(mut mesh3d, mut mat, _)| {
+            mesh3d.0 = mesh.primitives[0].mesh.clone();
+            mat.0 = gltf.materials[0].clone();
+        });
     }
 }
 
-fn display_tower_pool(
-    tower_pool: Res<TowerPool>,
-    assets_towers: Res<Assets<TowerDetails>>,
-    mut query: Query<&mut Text, With<OnPlacementOverlay>>,
-) {
-    for mut text in query.iter_mut() {
-        text.0 = format!(
-            "Towers\n\n{}",
-            tower_pool
-                .towers
-                .iter()
-                .enumerate()
-                .map(|(i, tower)| {
-                    let prefix = if i == tower_pool.highlighted {
-                        ">> "
-                    } else {
-                        "   "
-                    };
-                    let tower_details = assets_towers.get(*tower).unwrap();
-                    format!("{}{}", prefix, tower_details.name)
-                })
-                .collect::<Vec<String>>()
-                .join("\n")
-        );
-    }
-}
+// fn place_tower(
+//     action_state: Res<ActionState<PlacementAction>>,
+//     mut commands: Commands,
+//     assets_towers: Res<Assets<TowerDetails>>,
+//     res: Res<Assets<Gltf>>,
+//     assets_gltfmesh: Res<Assets<GltfMesh>>,
+//     mut tower_pool: ResMut<TowerPool>,
+//     placeholder_query: Query<&Transform, With<TowerPlaceholder>>,
+// ) {
+//     if action_state.just_pressed(&PlacementAction::PlaceTower) {
+//         let placeholder_transform = placeholder_query.single();
+//         if let Some(tower) = tower_pool.get_highlighted() {
+//             let tower_details = assets_towers.get(*tower).unwrap();
+//             let gltf = res.get(&tower_details.model).unwrap();
+//             let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
+//             let mesh3d = mesh.primitives[0].mesh.clone();
+//             let mat = gltf.materials[0].clone();
+//             commands.spawn((
+//                 Mesh3d(mesh3d),
+//                 Transform::from_translation(placeholder_transform.translation),
+//                 MeshMaterial3d(mat),
+//                 Tower {
+//                     name: tower_details.name.clone(),
+//                     element_type: tower_details.element_type,
+//                     attack_speed: Timer::from_seconds(1.0, TimerMode::Repeating),
+//                 },
+//                 Obstacle,
+//             ));
+//         }
+//         tower_pool.remove_tower(tower_pool.get_highlighted().unwrap());
+//     }
+// }
 
 fn start_wave(
     action_state: Res<ActionState<PlacementAction>>,

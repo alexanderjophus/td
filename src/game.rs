@@ -8,7 +8,7 @@ use super::GameState;
 use bevy::gltf::GltfMesh;
 use bevy::math::vec2;
 use bevy::prelude::*;
-use bevy::utils::HashMap;
+use bevy::utils::{HashMap, HashSet};
 use bevy::{ecs::system::SystemState, gltf::Gltf, render::primitives::Aabb};
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
@@ -49,8 +49,8 @@ impl Plugin for GamePlugin {
                 highlighted: 0,
             })
             .insert_resource(TowerPool {
-                towers: Vec::new(),
-                highlighted: 0,
+                towers: HashSet::new(),
+                highlighted: AssetId::default(),
             })
             .register_type::<DiePool>()
             .add_event::<DiePurchaseEvent>()
@@ -87,7 +87,7 @@ pub struct AllAssets {
 }
 
 /// Representation of a loaded tower file.
-#[derive(Asset, Resource, Debug, PartialEq, Clone, TypePath)]
+#[derive(Asset, Resource, Component, Debug, PartialEq, Clone, TypePath)]
 pub struct TowerDetails {
     pub name: String,
     pub element_type: BaseElementType,
@@ -364,18 +364,66 @@ struct DiePool {
     highlighted: usize,
 }
 
-#[derive(Resource, Default, Debug, PartialEq)]
+#[derive(Resource, Default, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Resource)]
 struct TowerPool {
-    towers: Vec<AssetId<TowerDetails>>,
-    highlighted: usize,
+    towers: HashSet<AssetId<TowerDetails>>,
+    highlighted: AssetId<TowerDetails>,
 }
 
 impl TowerPool {
+    fn add_tower(&mut self, id: AssetId<TowerDetails>) {
+        self.towers.insert(id);
+        if self.highlighted == AssetId::default() {
+            self.highlighted = id;
+        }
+    }
+
+    fn remove_tower(&mut self, id: &AssetId<TowerDetails>) {
+        self.towers.remove(id);
+        if self.highlighted == *id {
+            self.highlighted = self
+                .towers
+                .iter()
+                .next()
+                .unwrap_or(&AssetId::default())
+                .clone();
+        }
+    }
+
+    fn is_highlighted(&self, id: &AssetId<TowerDetails>) -> bool {
+        self.highlighted == *id
+    }
+
+    fn get_highlighted(&self) -> Option<&AssetId<TowerDetails>> {
+        if self.towers.is_empty() {
+            return None;
+        }
+
+        self.towers
+            .get(&self.highlighted)
+            .or_else(|| self.towers.iter().next())
+    }
+
     fn toggle_highlighted(&mut self) {
         if self.towers.is_empty() {
             return;
         }
-        self.highlighted = (self.highlighted + 1) % self.towers.len();
+
+        self.highlighted = match self.towers.get(&self.highlighted) {
+            Some(_) => {
+                let mut iter = self.towers.iter();
+                let mut next = iter.next().unwrap();
+                for id in iter {
+                    if *id == self.highlighted {
+                        break;
+                    }
+                    next = id;
+                }
+                *next
+            }
+            None => *self.towers.iter().next().unwrap(),
+        };
     }
 }
 
@@ -411,7 +459,8 @@ fn setup(
         MeshMaterial3d(enemy_mesh.materials[0].clone()),
         Transform::from_translation(Vec3::new(0.5, 0.0, -10.0)),
         EnemySpawner {
-            timer: Timer::new(Duration::from_secs(1), TimerMode::Repeating),
+            total_time: Timer::new(Duration::from_secs(20), TimerMode::Once),
+            delta: Timer::new(Duration::from_secs(1), TimerMode::Repeating),
         },
     ));
 
@@ -484,7 +533,7 @@ fn die_rolled(
             .filter(|(_, tower)| tower.element_type == selected_type)
             .choose(&mut rand::thread_rng())
             .unwrap();
-        tower_pool.towers.push(id);
+        tower_pool.add_tower(id);
         ev_result.send(DieRollResultEvent(die, face));
     }
 }
