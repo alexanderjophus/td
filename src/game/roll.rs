@@ -6,7 +6,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::dice_physics::DicePhysicsPlugin;
+use super::dice_physics::{DicePhysicsPlugin, ThrowPower};
 use super::{Die, DiePool, DieRollResultEvent, DieRolledEvent, GamePlayState, Rarity, TowerPool};
 
 pub struct RollPlugin;
@@ -37,7 +37,8 @@ impl Plugin for RollPlugin {
 enum RollAction {
     HighlightLeft,
     HighlightRight,
-    Roll,
+    Throw,
+    ThrowPower,
     Placement,
 }
 
@@ -46,7 +47,8 @@ impl Actionlike for RollAction {
         match self {
             RollAction::HighlightLeft => InputControlKind::Button,
             RollAction::HighlightRight => InputControlKind::Button,
-            RollAction::Roll => InputControlKind::Button,
+            RollAction::Throw => InputControlKind::Button,
+            RollAction::ThrowPower => InputControlKind::Axis,
             RollAction::Placement => InputControlKind::Button,
         }
     }
@@ -60,13 +62,15 @@ impl RollAction {
         // Default gamepad input bindings
         input_map.insert(Self::HighlightLeft, GamepadButton::DPadLeft);
         input_map.insert(Self::HighlightRight, GamepadButton::DPadRight);
-        input_map.insert(Self::Roll, GamepadButton::East);
+        input_map.insert(Self::Throw, GamepadButton::East);
+        input_map.insert_axis(Self::ThrowPower, GamepadAxis::LeftStickY);
         input_map.insert(Self::Placement, GamepadButton::South);
 
         // Default kbm input bindings
         input_map.insert(Self::HighlightLeft, KeyCode::ArrowLeft);
         input_map.insert(Self::HighlightRight, KeyCode::ArrowRight);
-        input_map.insert(Self::Roll, KeyCode::Space);
+        input_map.insert(Self::Throw, KeyCode::Space);
+        input_map.insert_axis(Self::ThrowPower, VirtualAxis::vertical_arrow_keys());
         input_map.insert(Self::Placement, KeyCode::Enter);
 
         input_map
@@ -139,6 +143,7 @@ fn handle_input(
     mut die_pool: ResMut<DiePool>,
     mut next_state: ResMut<NextState<GamePlayState>>,
     mut ev_rolled: EventWriter<DieRolledEvent>,
+    mut throw_power: ResMut<ThrowPower>,
     tower_pool: Res<TowerPool>,
 ) {
     if action_state.just_pressed(&RollAction::HighlightLeft) {
@@ -150,7 +155,7 @@ fn handle_input(
         die_pool.highlighted = (die_pool.highlighted + 1) % die_pool.dice.len();
     }
 
-    if action_state.just_pressed(&RollAction::Roll) {
+    if action_state.just_pressed(&RollAction::Throw) {
         let idx = die_pool.highlighted;
         // Only trigger the roll if there's no result yet
         if die_pool.dice[idx].result.is_none() {
@@ -158,6 +163,8 @@ fn handle_input(
             ev_rolled.send(DieRolledEvent(die_pool.dice[idx].clone()));
         }
     }
+
+    throw_power.0 = action_state.clamped_value(&RollAction::ThrowPower);
 
     if action_state.just_pressed(&RollAction::Placement) {
         if tower_pool.towers.is_empty() {

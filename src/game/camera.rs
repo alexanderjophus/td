@@ -47,7 +47,7 @@ impl CameraAction {
 
 #[derive(Reflect, Component, Default)]
 #[reflect(Component)]
-struct FollowCam;
+pub struct FollowCam;
 
 fn setup(mut commands: Commands) {
     commands.spawn((

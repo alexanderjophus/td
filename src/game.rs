@@ -453,6 +453,9 @@ fn setup(
             total_time: Timer::new(Duration::from_secs(20), TimerMode::Once),
             delta: Timer::new(Duration::from_secs(1), TimerMode::Repeating),
         },
+        RigidBody::Fixed,
+        Collider::cylinder(10.0, 0.5),
+        Name::new("EnemySpawner"),
     ));
 
     let house_mesh = res.get(&gltfassets.house).unwrap();
