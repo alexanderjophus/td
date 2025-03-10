@@ -6,24 +6,26 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{BaseElementType, Die, DieBuilder, DiePool, DiePurchaseEvent, GamePlayState, Rarity};
+use super::{
+    BaseElementType, Die, DieBuilder, DiePurchaseEvent, GamePlayState, GameResources, Rarity,
+};
 
 pub struct EconomyPlugin;
 
 impl Plugin for EconomyPlugin {
     fn build(&self, app: &mut App) {
+        let shop_items = vec![
+            DieBuilder::from_d6_type(BaseElementType::Fire).build(),
+            DieBuilder::from_d6_type(BaseElementType::Water).build(),
+            DieBuilder::from_d6_type(BaseElementType::Earth).build(),
+            DieBuilder::from_d6_type(BaseElementType::Wind).build(),
+        ];
         app.add_plugins(InputManagerPlugin::<EconomyAction>::default())
             .init_resource::<ActionState<EconomyAction>>()
             .insert_resource(EconomyAction::default_input_map())
-            .insert_resource(Economy { money: 50 })
             .insert_resource(DieShop {
                 highlighted: 0,
-                items: vec![
-                    DieBuilder::from_d6_type(BaseElementType::Fire).build(),
-                    DieBuilder::from_d6_type(BaseElementType::Water).build(),
-                    DieBuilder::from_d6_type(BaseElementType::Earth).build(),
-                    DieBuilder::from_d6_type(BaseElementType::Wind).build(),
-                ],
+                items: shop_items,
             })
             .add_systems(OnEnter(GameState::Game), economy_setup)
             .add_systems(
@@ -79,11 +81,6 @@ impl EconomyAction {
     }
 }
 
-#[derive(Resource)]
-pub struct Economy {
-    pub money: usize,
-}
-
 #[derive(Resource, Debug, Clone, PartialEq)]
 struct DieShop {
     items: Vec<Die>,
@@ -101,7 +98,7 @@ struct DieShopItem {
 #[derive(Component)]
 struct MoneyText;
 
-fn economy_setup(mut commands: Commands, shop: Res<DieShop>, economy: ResMut<Economy>) {
+fn economy_setup(mut commands: Commands, shop: Res<DieShop>, economy: ResMut<GameResources>) {
     let mut p = commands.spawn((
         Node {
             width: Val::Percent(100.),
@@ -170,7 +167,7 @@ fn economy_setup(mut commands: Commands, shop: Res<DieShop>, economy: ResMut<Eco
 
 fn choose_die(
     action_state: Res<ActionState<EconomyAction>>,
-    mut economy: ResMut<Economy>,
+    mut game_resources: ResMut<GameResources>,
     mut shop: ResMut<DieShop>,
     mut ev_die_purchase: EventWriter<DiePurchaseEvent>,
 ) {
@@ -183,37 +180,78 @@ fn choose_die(
     // Buy the die, remove costs, add to diepool resource
     if action_state.just_pressed(&EconomyAction::BuyDie) {
         let cost = shop.items[shop.highlighted].value;
-        if economy.money < cost {
+        if game_resources.money < cost
+            || game_resources.dice.contains(&shop.items[shop.highlighted])
+        {
             return;
         }
-        economy.money -= cost;
-        ev_die_purchase.send(DiePurchaseEvent(shop.items[shop.highlighted].clone()));
+        game_resources.money -= cost;
+        let idx = shop.highlighted;
+        game_resources.dice.push(shop.items[idx].clone());
+        ev_die_purchase.send(DiePurchaseEvent(shop.items[idx].clone()));
     }
 }
 
-fn update_shop_ui(shop: ResMut<DieShop>, mut query: Query<(&mut BackgroundColor, &DieShopItem)>) {
-    for (mut bg_color, item) in query.iter_mut() {
+fn update_shop_ui(
+    shop: ResMut<DieShop>,
+    game_resources: Res<GameResources>,
+    mut query: Query<(&mut BackgroundColor, &DieShopItem, Entity), Without<Text>>,
+    text_query: Query<&mut Text>,
+    mut commands: Commands,
+) {
+    for (mut bg_color, item, entity) in query.iter_mut() {
+        // First update background colors for selection highlighting
         if item.item == shop.items[shop.highlighted] {
             *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5));
         } else {
             *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.8));
         }
+
+        // Check if this item is purchased and needs the "Purchased" label
+        let is_purchased = game_resources.dice.contains(&item.item);
+
+        // Check if this item already has the "Purchased" label
+        let has_purchased_label = text_query
+            .get(entity)
+            .map(|text| text.0 == "Purchased")
+            .unwrap_or(false);
+
+        // Add "Purchased" label if needed and not already present
+        if is_purchased && !has_purchased_label {
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn((
+                    Node {
+                        width: Val::Percent(80.),
+                        height: Val::Px(30.),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(0.5, 0.0, 0.0, 0.7)),
+                    Text::new("Purchased"),
+                    TextColor(WHITE.into()),
+                ));
+            });
+        }
     }
 }
 
-fn update_economy_ui(economy: Res<Economy>, mut query: Query<&mut Text, With<MoneyText>>) {
+fn update_economy_ui(
+    game_resources: Res<GameResources>,
+    mut query: Query<&mut Text, With<MoneyText>>,
+) {
     for mut text in query.iter_mut() {
-        text.0 = economy.money.to_string();
+        text.0 = game_resources.money.to_string();
     }
 }
 
 fn start_rolling(
     action_state: Res<ActionState<EconomyAction>>,
     mut next_state: ResMut<NextState<GamePlayState>>,
-    die_pool: Res<DiePool>,
+    game_resources: Res<GameResources>,
 ) {
     if action_state.just_pressed(&EconomyAction::PlacementPhase) {
-        if die_pool.dice.is_empty() {
+        if game_resources.dice.is_empty() {
             return;
         }
         next_state.set(GamePlayState::Rolling);

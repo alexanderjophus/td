@@ -7,7 +7,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 use crate::{despawn_screen, GameState};
 
 use super::dice_physics::{DicePhysicsPlugin, ThrowPower};
-use super::{Die, DiePool, DieRollResultEvent, DieRolledEvent, GamePlayState, Rarity, TowerPool};
+use super::{Die, DieRollResultEvent, DieRolledEvent, GamePlayState, GameResources, Rarity};
 
 pub struct RollPlugin;
 
@@ -22,7 +22,12 @@ impl Plugin for RollPlugin {
         .add_systems(OnEnter(GamePlayState::Rolling), rolling_setup)
         .add_systems(
             Update,
-            (handle_input, update_die_selection, update_die_result)
+            (
+                handle_input,
+                update_die_selection,
+                update_die_result,
+                save_die_result,
+            )
                 .run_if(in_state(GameState::Game).and(in_state(GamePlayState::Rolling))),
         )
         .add_systems(
@@ -85,7 +90,7 @@ struct DieItem {
     die: Die,
 }
 
-fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
+fn rolling_setup(mut commands: Commands, game_resources: Res<GameResources>) {
     commands
         .spawn((
             Node {
@@ -105,7 +110,7 @@ fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
                 },
                 Text::new("Rolling: Choose a die"),
             ));
-            for die in die_pool.dice.iter() {
+            for die in game_resources.dice.iter() {
                 let mut n = parent.spawn((
                     Node {
                         width: Val::Percent(20.),
@@ -114,11 +119,13 @@ fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(if die == &die_pool.dice[die_pool.highlighted] {
-                        Color::srgba(0., 0., 0., 0.5)
-                    } else {
-                        Color::srgba(0., 0., 0., 0.8)
-                    }),
+                    BackgroundColor(
+                        if die == &game_resources.dice[game_resources.highlighted_die] {
+                            Color::srgba(0., 0., 0., 0.5)
+                        } else {
+                            Color::srgba(0., 0., 0., 0.8)
+                        },
+                    ),
                     DieItem { die: die.clone() },
                 ));
                 for face in die.faces.iter() {
@@ -140,34 +147,36 @@ fn rolling_setup(mut commands: Commands, die_pool: Res<DiePool>) {
 
 fn handle_input(
     action_state: Res<ActionState<RollAction>>,
-    mut die_pool: ResMut<DiePool>,
+    mut game_resources: ResMut<GameResources>,
     mut next_state: ResMut<NextState<GamePlayState>>,
     mut ev_rolled: EventWriter<DieRolledEvent>,
     mut throw_power: ResMut<ThrowPower>,
-    tower_pool: Res<TowerPool>,
 ) {
     if action_state.just_pressed(&RollAction::HighlightLeft) {
-        die_pool.highlighted =
-            (die_pool.highlighted + die_pool.dice.len() - 1) % die_pool.dice.len();
+        game_resources.highlighted_die =
+            (game_resources.highlighted_die + game_resources.dice.len() - 1)
+                % game_resources.dice.len();
     }
 
     if action_state.just_pressed(&RollAction::HighlightRight) {
-        die_pool.highlighted = (die_pool.highlighted + 1) % die_pool.dice.len();
+        game_resources.highlighted_die =
+            (game_resources.highlighted_die + 1) % game_resources.dice.len();
     }
 
     if action_state.just_pressed(&RollAction::Throw) {
-        let idx = die_pool.highlighted;
+        let idx = game_resources.highlighted_die;
         // Only trigger the roll if there's no result yet
-        if die_pool.dice[idx].result.is_none() {
+        if game_resources.dice[idx].result.is_none() && !game_resources.dice[idx].rolling {
+            game_resources.dice[idx].rolling = true;
             // The physics system will handle the actual rolling
-            ev_rolled.send(DieRolledEvent(die_pool.dice[idx].clone()));
+            ev_rolled.send(DieRolledEvent(game_resources.dice[idx].clone()));
         }
     }
 
     throw_power.0 = action_state.clamped_value(&RollAction::ThrowPower);
 
     if action_state.just_pressed(&RollAction::Placement) {
-        if tower_pool.towers.is_empty() {
+        if game_resources.towers.is_empty() {
             return;
         }
         next_state.set(GamePlayState::Placement);
@@ -181,7 +190,7 @@ fn update_die_result(
 ) {
     for ev in ev_rolled.read() {
         for (entity, item) in query.iter_mut() {
-            if item.die.faces == ev.0.faces {
+            if item.die == ev.0 {
                 commands.entity(entity).despawn_descendants();
                 commands.entity(entity).with_child((
                     Node::default(),
@@ -200,14 +209,31 @@ fn update_die_result(
 }
 
 fn update_die_selection(
-    die_pool: Res<DiePool>,
+    game_resources: Res<GameResources>,
     mut query: Query<(&mut BackgroundColor, &DieItem)>,
 ) {
     for (mut bg, item) in query.iter_mut() {
-        *bg = BackgroundColor(if item.die == die_pool.dice[die_pool.highlighted] {
-            Color::srgba(0., 0., 0., 0.5)
-        } else {
-            Color::srgba(0., 0., 0., 0.8)
-        });
+        *bg = BackgroundColor(
+            if item.die == game_resources.dice[game_resources.highlighted_die] {
+                Color::srgba(0., 0., 0., 0.5)
+            } else {
+                Color::srgba(0., 0., 0., 0.8)
+            },
+        );
+    }
+}
+
+fn save_die_result(
+    mut game_resources: ResMut<GameResources>,
+    mut ev_result: EventReader<DieRollResultEvent>,
+) {
+    for ev in ev_result.read() {
+        // Find the die with matching ID and update its result
+        for die in game_resources.dice.iter_mut() {
+            if *die == ev.0 {
+                die.result = Some(ev.1);
+                break;
+            }
+        }
     }
 }

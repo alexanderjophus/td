@@ -4758,6 +4758,7 @@ dependencies = [
  "leafwing-input-manager",
  "rand",
  "serde",
+ "uuid",
  "vleue_navigator",
 ]
 

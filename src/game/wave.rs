@@ -6,9 +6,8 @@ use vleue_navigator::prelude::*;
 use crate::GameState;
 
 use super::{
-    economy::Economy,
     placement::{Projectile, Tower},
-    EnemyDetails, GamePlayState, Goal, Wave,
+    EnemyDetails, GamePlayState, GameResources, Goal, Wave,
 };
 
 pub struct WavePlugin;
@@ -227,12 +226,12 @@ fn target_death(
     mut commands: Commands,
     enemies: Query<(Entity, &Enemy)>,
     projectiles: Query<(Entity, &Projectile)>,
-    mut economy: ResMut<Economy>,
+    mut game_resources: ResMut<GameResources>,
 ) {
     for (ent, enemy) in &enemies {
         if enemy.health == 0 {
             commands.entity(ent).despawn_recursive();
-            economy.money += 10;
+            game_resources.money += 10;
         }
     }
     for (ent, projectile) in &projectiles {

@@ -10,7 +10,7 @@ use super::GameState;
 use bevy::gltf::GltfMesh;
 use bevy::math::vec2;
 use bevy::prelude::*;
-use bevy::utils::{HashMap, HashSet};
+use bevy::utils::HashMap;
 use bevy::{ecs::system::SystemState, gltf::Gltf, render::primitives::Aabb};
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
@@ -45,17 +45,9 @@ impl Plugin for GamePlugin {
             ))
             .init_resource::<Assets<TowerDetails>>()
             .init_resource::<Assets<EnemyDetails>>()
-            .init_resource::<DiePool>()
-            .init_resource::<TowerPool>()
-            .insert_resource(DiePool {
-                dice: Vec::new(),
-                highlighted: 0,
-            })
-            .insert_resource(TowerPool {
-                towers: HashSet::new(),
-                highlighted: AssetId::default(),
-            })
-            .register_type::<DiePool>()
+            .init_resource::<GameResources>()
+            .register_type::<GameResources>()
+            .register_type::<uuid::Uuid>()
             .add_event::<DiePurchaseEvent>()
             .add_event::<DieRolledEvent>()
             .add_event::<DieRollResultEvent>()
@@ -84,6 +76,28 @@ pub struct AllAssets {
     pub towers: Vec<Handle<TowerDetails>>,
     #[asset(key = "enemies", collection(typed))]
     pub enemies: Vec<Handle<EnemyDetails>>,
+}
+
+#[derive(Resource, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Resource)]
+pub struct GameResources {
+    money: usize,
+    dice: Vec<Die>,
+    highlighted_die: usize,
+    towers: Vec<AssetId<TowerDetails>>,
+    highlighted_tower: usize,
+}
+
+impl Default for GameResources {
+    fn default() -> Self {
+        GameResources {
+            money: 50,
+            dice: Vec::new(),
+            highlighted_die: 0,
+            towers: Vec::new(),
+            highlighted_tower: 0,
+        }
+    }
 }
 
 /// Representation of a loaded tower file.
@@ -302,7 +316,7 @@ struct DieRolledEvent(Die);
 #[derive(Event)]
 struct DieRollResultEvent(Die, DieFace);
 
-#[derive(Resource, Debug, Clone, PartialEq, Reflect)]
+#[derive(Resource, Debug, Clone, Reflect)]
 #[reflect(Resource)]
 struct Die {
     // the faces of the die
@@ -311,6 +325,14 @@ struct Die {
     value: usize,
     // result of the roll
     result: Option<DieFace>,
+    // whether the die is currently being rolled
+    rolling: bool,
+}
+
+impl PartialEq for Die {
+    fn eq(&self, other: &Self) -> bool {
+        self.faces == other.faces
+    }
 }
 
 struct DieBuilder {
@@ -335,85 +357,12 @@ impl DieBuilder {
             ));
         }
 
-        // the value should;
-        // have a base value depending on number of faces
-        // grow with the rarity on each face
-
         Die {
             faces,
             value: 20,
             result: None,
+            rolling: false,
         }
-    }
-}
-
-#[derive(Resource, Default, Debug, Clone, PartialEq, Reflect)]
-#[reflect(Resource)]
-struct DiePool {
-    dice: Vec<Die>,
-    highlighted: usize,
-}
-
-#[derive(Resource, Default, Debug, Clone, PartialEq, Reflect)]
-#[reflect(Resource)]
-struct TowerPool {
-    towers: HashSet<AssetId<TowerDetails>>,
-    highlighted: AssetId<TowerDetails>,
-}
-
-impl TowerPool {
-    fn add_tower(&mut self, id: AssetId<TowerDetails>) {
-        self.towers.insert(id);
-        if self.highlighted == AssetId::default() {
-            self.highlighted = id;
-        }
-    }
-
-    fn remove_tower(&mut self, id: &AssetId<TowerDetails>) {
-        self.towers.remove(id);
-        if self.highlighted == *id {
-            self.highlighted = self
-                .towers
-                .iter()
-                .next()
-                .unwrap_or(&AssetId::default())
-                .clone();
-        }
-    }
-
-    fn is_highlighted(&self, id: &AssetId<TowerDetails>) -> bool {
-        self.highlighted == *id
-    }
-
-    fn get_highlighted(&self) -> Option<&AssetId<TowerDetails>> {
-        if self.towers.is_empty() {
-            return None;
-        }
-
-        self.towers
-            .get(&self.highlighted)
-            .or_else(|| self.towers.iter().next())
-    }
-
-    fn toggle_highlighted(&mut self) {
-        if self.towers.is_empty() {
-            return;
-        }
-
-        self.highlighted = match self.towers.get(&self.highlighted) {
-            Some(_) => {
-                let mut iter = self.towers.iter();
-                let mut next = iter.next().unwrap();
-                for id in iter {
-                    if *id == self.highlighted {
-                        break;
-                    }
-                    next = id;
-                }
-                *next
-            }
-            None => *self.towers.iter().next().unwrap(),
-        };
     }
 }
 
@@ -513,7 +462,10 @@ struct Wave {
     timer: Timer,
 }
 
-fn die_purchased(mut die_pool: ResMut<DiePool>, mut ev_purchased: EventReader<DiePurchaseEvent>) {
+fn die_purchased(
+    mut die_pool: ResMut<GameResources>,
+    mut ev_purchased: EventReader<DiePurchaseEvent>,
+) {
     for ev in ev_purchased.read() {
         die_pool.dice.push(ev.0.clone());
     }

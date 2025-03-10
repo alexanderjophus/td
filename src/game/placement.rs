@@ -3,7 +3,7 @@ use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
 
 use crate::{despawn_screen, GameState};
 
-use super::{BaseElementType, GamePlayState, TowerDetails, TowerPool, Wave, SNAP_OFFSET};
+use super::{BaseElementType, GamePlayState, GameResources, TowerDetails, Wave, SNAP_OFFSET};
 
 pub struct PlacementPlugin;
 
@@ -103,26 +103,29 @@ pub struct PlacementOverlay;
 
 fn setup(
     mut commands: Commands,
-    tower_pool: ResMut<TowerPool>,
+    game_resources: ResMut<GameResources>,
     mut assets_mesh: ResMut<Assets<Mesh>>,
     assets_gltfmesh: Res<Assets<GltfMesh>>,
     assets_towers: Res<Assets<TowerDetails>>,
     res: Res<Assets<Gltf>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if let Some(tower) = tower_pool.get_highlighted() {
-        let tower_details = assets_towers.get(*tower).unwrap();
-        let gltf = res.get(&tower_details.model).unwrap();
-        let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
-        let mesh3d = mesh.primitives[0].mesh.clone();
-        let mat = gltf.materials[0].clone();
-        commands.spawn((
-            Mesh3d(mesh3d),
-            MeshMaterial3d(mat),
-            Transform::default().with_translation(Vec3::new(SNAP_OFFSET, 0.0, SNAP_OFFSET)),
-            TowerPlaceholder,
-        ));
-    }
+    let tower = game_resources
+        .towers
+        .get(game_resources.highlighted_tower)
+        .unwrap();
+    let tower_details = assets_towers.get(*tower).unwrap();
+    let gltf = res.get(&tower_details.model).unwrap();
+    let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
+    let mesh3d = mesh.primitives[0].mesh.clone();
+    let mat = gltf.materials[0].clone();
+    commands.spawn((
+        Mesh3d(mesh3d),
+        MeshMaterial3d(mat),
+        Transform::default().with_translation(Vec3::new(SNAP_OFFSET, 0.0, SNAP_OFFSET)),
+        TowerPlaceholder,
+    ));
+
     let blue = materials.add(StandardMaterial {
         base_color: Color::srgb(0.0, 0.0, 1.0),
         ..Default::default()
@@ -154,8 +157,9 @@ fn setup(
         Text::new("Towers:"),
     ));
 
-    for tower in tower_pool.towers.iter() {
+    for tower in game_resources.towers.iter() {
         let tower_details = assets_towers.get(*tower).unwrap();
+        let idx = game_resources.highlighted_tower;
         p.with_child((
             Node {
                 width: Val::Percent(20.),
@@ -164,7 +168,7 @@ fn setup(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(if tower_pool.is_highlighted(tower) {
+            BackgroundColor(if tower == &game_resources.towers[idx] {
                 Color::srgba(0., 0., 0., 0.5)
             } else {
                 Color::srgba(0., 0., 0., 0.8)
@@ -218,20 +222,22 @@ fn placeholder_snap_to_cursor(
 
 fn toggle_placeholder_type(
     action_state: Res<ActionState<PlacementAction>>,
-    mut tower_pool: ResMut<TowerPool>,
+    mut game_resources: ResMut<GameResources>,
 ) {
     if action_state.just_pressed(&PlacementAction::ToggleTowerType) {
-        tower_pool.toggle_highlighted();
+        game_resources.highlighted_tower =
+            (game_resources.highlighted_tower + 1) % game_resources.towers.len();
     }
 }
 
 fn update_tower_selection(
-    tower_pool: Res<TowerPool>,
+    game_resources: Res<GameResources>,
     assets_towers: Res<Assets<TowerDetails>>,
     mut query: Query<(&mut BackgroundColor, &TowerDetails)>,
 ) {
     for (mut bg_color, item) in query.iter_mut() {
-        if let Some(tower) = tower_pool.get_highlighted() {
+        let idx = game_resources.highlighted_tower;
+        if let Some(tower) = game_resources.towers.get(idx) {
             let tower_details = assets_towers.get(*tower).unwrap();
             if item == tower_details {
                 *bg_color = BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5));
@@ -244,7 +250,7 @@ fn update_tower_selection(
 
 fn display_placeholder(
     mut commands: Commands,
-    tower_pool: ResMut<TowerPool>,
+    game_resources: ResMut<GameResources>,
     assets_gltfmesh: Res<Assets<GltfMesh>>,
     assets_towers: Res<Assets<TowerDetails>>,
     res: Res<Assets<Gltf>>,
@@ -253,13 +259,14 @@ fn display_placeholder(
         With<TowerPlaceholder>,
     >,
 ) {
-    if tower_pool.towers.is_empty() {
+    if game_resources.towers.is_empty() {
         query.iter_mut().for_each(|(_, _, entity)| {
             commands.entity(entity).despawn_recursive();
         });
         return;
     }
-    if let Some(tower) = tower_pool.get_highlighted() {
+    let idx = game_resources.highlighted_tower;
+    if let Some(tower) = game_resources.towers.get(idx) {
         let tower_details = assets_towers.get(*tower).unwrap();
         let gltf = res.get(&tower_details.model).unwrap();
         let mesh = assets_gltfmesh.get(&gltf.meshes[0]).unwrap();
