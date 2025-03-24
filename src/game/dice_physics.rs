@@ -1,5 +1,5 @@
+use avian3d::prelude::*;
 use bevy::prelude::*;
-use bevy_rapier3d::prelude::*;
 use std::f32::consts::PI;
 use std::time::Duration;
 
@@ -11,18 +11,10 @@ pub struct DicePhysicsPlugin;
 
 impl Plugin for DicePhysicsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
-            .add_plugins(RapierDebugRenderPlugin::default().disabled())
-            .insert_resource(ThrowPower(0.2))
-            .add_systems(OnEnter(GamePlayState::Rolling), setup_throwing_area)
+        app.insert_resource(ThrowPower(0.2))
             .add_systems(
                 Update,
-                (
-                    handle_dice_roll,
-                    check_dice_result,
-                    cleanup_dice,
-                    update_throw_indicator,
-                )
+                (handle_dice_roll, check_dice_result, cleanup_dice)
                     .run_if(in_state(GamePlayState::Rolling)),
             )
             .add_systems(OnExit(GamePlayState::Rolling), despawn_screen::<OnDieRoll>);
@@ -43,45 +35,9 @@ struct PhysicalDie {
 #[derive(Component)]
 struct OnDieRoll;
 
-// Component for the throw indicator
-#[derive(Component)]
-struct ThrowIndicator;
-
 // Resource for tracking throw parameters
 #[derive(Resource)]
 pub struct ThrowPower(pub f32);
-
-// Setup the throwing area
-fn setup_throwing_area(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    // // Initialize throw parameters with default value
-    // commands.insert_resource(ThrowPower(0.2));
-
-    // Create a visual indicator for throw direction and power
-    commands.spawn((
-        Mesh3d(meshes.add(Cylinder::new(0.05, 2.0))), // Thin arrow-like cylinder
-        MeshMaterial3d(materials.add(Color::srgba(1.0, 0.5, 0.0, 0.5))), // Semi-transparent orange
-        Transform::from_xyz(0.0, 0.1, 0.0) // Just above the ground
-            .with_rotation(Quat::from_rotation_x(PI / 2.0)), // Point forward
-        ThrowIndicator,
-        OnDieRoll,
-    ));
-}
-
-// Update the throw indicator based on current throw parameters
-fn update_throw_indicator(
-    throw_power: Res<ThrowPower>,
-    mut indicator_query: Query<&mut Transform, With<ThrowIndicator>>,
-) {
-    if let Ok(mut transform) = indicator_query.get_single_mut() {
-        // Update length based on power
-        let scale = Vec3::new(1.0, throw_power.0 * 3.0, 1.0); // Scale the y-axis of the cylinder
-        transform.scale = scale;
-    }
-}
 
 // Modified handle_dice_roll to use throw parameters
 fn handle_dice_roll(
@@ -99,7 +55,7 @@ fn handle_dice_roll(
         let direction = Vec3::new(0.0, 0.5, -1.0).normalize();
 
         // Scale by power
-        let throw_force = direction * (throw_power.0 * 10.0 + 5.0); // Base power + scaling
+        let linear_velocity = direction * (throw_power.0 * 10.0 + 5.0); // Base power + scaling
 
         // Calculate a reasonable angular velocity
         // should be spinning on a random axis
@@ -116,17 +72,12 @@ fn handle_dice_roll(
             Transform {
                 translation: transform.translation + transform.forward() * 2.0,
                 rotation: transform.rotation,
-                scale: Vec3::splat(0.5),
+                ..Default::default()
             },
             RigidBody::Dynamic,
-            Collider::cuboid(0.5, 0.5, 0.5),
-            Restitution::coefficient(0.7), // Bounciness
-            Friction::coefficient(0.5),
-            // Apply initial velocities
-            Velocity {
-                linvel: throw_force,
-                angvel: angular_velocity,
-            },
+            ColliderConstructorHierarchy::new(ColliderConstructor::TrimeshFromMesh),
+            LinearVelocity(linear_velocity),
+            AngularVelocity(angular_velocity),
             PhysicalDie {
                 die_data,
                 is_rolling: true,
@@ -141,11 +92,16 @@ fn handle_dice_roll(
 
 // System to check when the die has stopped rolling and determine the result
 fn check_dice_result(
-    mut dice_query: Query<(&mut PhysicalDie, &Transform, &Velocity)>,
+    mut dice_query: Query<(
+        &mut PhysicalDie,
+        &Transform,
+        &AngularVelocity,
+        &LinearVelocity,
+    )>,
     mut ev_result: EventWriter<DieRollResultEvent>,
     time: Res<Time>,
 ) {
-    for (mut physical_die, transform, velocity) in dice_query.iter_mut() {
+    for (mut physical_die, transform, ang_velocity, lin_velocity) in dice_query.iter_mut() {
         // Always tick the timer
         physical_die.roll_timeout_timer.tick(time.delta());
 
@@ -157,8 +113,7 @@ fn check_dice_result(
         let linear_threshold = 0.1;
         let angular_threshold = 0.1;
 
-        if (velocity.linvel.length() < linear_threshold
-            && velocity.angvel.length() < angular_threshold)
+        if (ang_velocity.length() < linear_threshold && lin_velocity.length() < angular_threshold)
             || physical_die.roll_timeout_timer.finished()
         {
             // Die has stopped, determine which face is up

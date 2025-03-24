@@ -52,7 +52,7 @@ pub struct FollowCam;
 fn setup(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 2.0, 5.0).looking_at(Vec3::new(0.0, 0.0, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, 7.5, 5.0).looking_at(Vec3::new(0.0, 4.0, 0.0), Vec3::Y),
         FollowCam,
     ));
 
@@ -77,5 +77,5 @@ fn control_camera(
         * action_state
             .clamped_axis_pair(&CameraAction::MoveCamera)
             .xy();
-    player_transform.translation += Vec3::new(move_delta.x, 0.0, -move_delta.y);
+    player_transform.translation += Vec3::new(move_delta.x, 0.0, -move_delta.y) * 5.0;
 }

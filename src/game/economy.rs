@@ -1,8 +1,5 @@
-use bevy::{
-    color::palettes::css::{BLUE, GREEN, ORANGE, PURPLE, WHITE},
-    prelude::*,
-};
-use leafwing_input_manager::{prelude::*, Actionlike, InputControlKind};
+use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 
 use crate::{despawn_screen, GameState};
 
@@ -20,64 +17,26 @@ impl Plugin for EconomyPlugin {
             DieBuilder::from_d6_type(BaseElementType::Earth).build(),
             DieBuilder::from_d6_type(BaseElementType::Wind).build(),
         ];
-        app.add_plugins(InputManagerPlugin::<EconomyAction>::default())
-            .init_resource::<ActionState<EconomyAction>>()
-            .insert_resource(EconomyAction::default_input_map())
-            .insert_resource(DieShop {
-                highlighted: 0,
-                items: shop_items,
-            })
-            .add_systems(OnEnter(GameState::Game), economy_setup)
-            .add_systems(
-                Update,
-                (choose_die, update_shop_ui, start_rolling, update_economy_ui)
-                    .run_if(in_state(GamePlayState::Economy).and(in_state(GameState::Game))),
+        app.insert_resource(DieShop {
+            highlighted: 0,
+            items: shop_items,
+        })
+        .add_systems(
+            Update,
+            (
+                economy_ui,
+                update_shop_ui,
+                update_economy_ui,
+                spin_die,
+                update_spinning_die,
+                update_die_info,
             )
-            .add_systems(
-                OnExit(GamePlayState::Economy),
-                despawn_screen::<DieShopOverlay>,
-            );
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Hash, Debug, Reflect, Resource)]
-#[reflect(Resource)]
-enum EconomyAction {
-    ToggleDieLeft,
-    ToggleDieRight,
-    BuyDie,
-    PlacementPhase,
-}
-
-impl Actionlike for EconomyAction {
-    fn input_control_kind(&self) -> InputControlKind {
-        match self {
-            EconomyAction::ToggleDieLeft => InputControlKind::Button,
-            EconomyAction::ToggleDieRight => InputControlKind::Button,
-            EconomyAction::BuyDie => InputControlKind::Button,
-            EconomyAction::PlacementPhase => InputControlKind::Button,
-        }
-    }
-}
-
-impl EconomyAction {
-    /// Define the default bindings to the input
-    fn default_input_map() -> InputMap<Self> {
-        let mut input_map = InputMap::default();
-
-        // Default gamepad input bindings
-        input_map.insert(Self::ToggleDieLeft, GamepadButton::DPadLeft);
-        input_map.insert(Self::ToggleDieRight, GamepadButton::DPadRight);
-        input_map.insert(Self::BuyDie, GamepadButton::East);
-        input_map.insert(Self::PlacementPhase, GamepadButton::South);
-
-        // Default kbm input bindings
-        input_map.insert(Self::ToggleDieLeft, KeyCode::ArrowLeft);
-        input_map.insert(Self::ToggleDieRight, KeyCode::ArrowRight);
-        input_map.insert(Self::BuyDie, KeyCode::Space);
-        input_map.insert(Self::PlacementPhase, KeyCode::Enter);
-
-        input_map
+                .run_if(in_state(GamePlayState::Economy).and(in_state(GameState::Game))),
+        )
+        .add_systems(
+            OnExit(GamePlayState::Economy),
+            despawn_screen::<DieShopOverlay>,
+        );
     }
 }
 
@@ -98,98 +57,136 @@ struct DieShopItem {
 #[derive(Component)]
 struct MoneyText;
 
-fn economy_setup(mut commands: Commands, shop: Res<DieShop>, economy: ResMut<GameResources>) {
-    let mut p = commands.spawn((
-        Node {
-            width: Val::Percent(100.),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            top: Val::Percent(60.),
-            ..default()
-        },
-        DieShopOverlay,
-    ));
-    p.with_child((
-        Node {
-            width: Val::Percent(10.),
-            height: Val::Percent(10.),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            ..default()
-        },
-        Text::new("Money:"),
-    ));
-    p.with_child((
-        Node {
-            width: Val::Percent(10.),
-            height: Val::Percent(10.),
-            flex_direction: FlexDirection::Row,
-            justify_content: JustifyContent::SpaceBetween,
-            ..default()
-        },
-        Text::new(economy.money.to_string()),
-        MoneyText,
-    ));
-    for item in shop.items.iter() {
-        p.with_children(|p| {
-            let mut die = p.spawn((
-                Node {
-                    width: Val::Percent(20.),
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::Center,
-                    ..default()
-                },
-                BackgroundColor(if item == &shop.items[shop.highlighted] {
-                    Color::srgba(0., 0., 0., 0.5)
-                } else {
-                    Color::srgba(0., 0., 0., 0.8)
-                }),
-                DieShopItem { item: item.clone() },
-            ));
-            for face in item.faces.iter() {
-                let color = match face.rarity {
-                    Rarity::Common => WHITE,
-                    Rarity::Uncommon => GREEN,
-                    Rarity::Rare => BLUE,
-                    Rarity::Epic => PURPLE,
-                    Rarity::Unique => ORANGE,
-                };
-                die.with_child((
-                    Node::default(),
-                    Text::new(face.primary_type.to_string()),
-                    TextColor(color.into()),
-                ));
-            }
-        });
-    }
+#[derive(Component)]
+struct SpinningDie {
+    rotation_speed: f32,
+    die_data: Die,
 }
 
-fn choose_die(
-    action_state: Res<ActionState<EconomyAction>>,
-    mut game_resources: ResMut<GameResources>,
+#[derive(Component)]
+struct DieInfoDisplay {
+    die_index: usize,
+}
+
+fn economy_ui(
+    mut contexts: EguiContexts,
     mut shop: ResMut<DieShop>,
+    mut economy: ResMut<GameResources>,
     mut ev_die_purchase: EventWriter<DiePurchaseEvent>,
+    mut next_state: ResMut<NextState<GamePlayState>>,
 ) {
-    if action_state.just_pressed(&EconomyAction::ToggleDieLeft) {
-        shop.highlighted = (shop.highlighted + shop.items.len() - 1) % shop.items.len();
-    }
-    if action_state.just_pressed(&EconomyAction::ToggleDieRight) {
-        shop.highlighted = (shop.highlighted + 1) % shop.items.len();
-    }
-    // Buy the die, remove costs, add to diepool resource
-    if action_state.just_pressed(&EconomyAction::BuyDie) {
-        let cost = shop.items[shop.highlighted].value;
-        if game_resources.money < cost
-            || game_resources.dice.contains(&shop.items[shop.highlighted])
-        {
-            return;
-        }
-        game_resources.money -= cost;
-        let idx = shop.highlighted;
-        game_resources.dice.push(shop.items[idx].clone());
-        ev_die_purchase.send(DiePurchaseEvent(shop.items[idx].clone()));
-    }
+    let ctx = contexts.ctx_mut();
+
+    egui::CentralPanel::default()
+        .frame(egui::Frame::none())
+        .show(ctx, |ui| {
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 10.0);
+
+                ui.add(egui::Label::new(egui::RichText::new("Die Shop").size(32.0)));
+
+                ui.add_space(10.0);
+
+                ui.add(egui::Label::new(
+                    egui::RichText::new(format!("Money: {}", economy.money))
+                        .background_color(egui::Color32::from_rgb(0, 0, 0))
+                        .size(24.0),
+                ));
+
+                ui.add_space(10.0);
+
+                ui.add(egui::Label::new(
+                    egui::RichText::new("Select a die to purchase:").size(24.0),
+                ));
+
+                ui.add_space(10.0);
+
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    // Display die info in a frame
+                    egui::Frame::dark_canvas(ui.style())
+                        .fill(egui::Color32::from_rgba_premultiplied(0, 0, 0, 200))
+                        .show(ui, |ui| {
+                            ui.label(
+                                egui::RichText::new(format!("Die #{}", shop.highlighted + 1))
+                                    .size(18.0),
+                            );
+                            // Navigation and selection row
+                            ui.horizontal(|ui| {
+                                // Left button
+                                if ui.button(egui::RichText::new("◀").size(24.0)).clicked() {
+                                    shop.highlighted = (shop.highlighted + shop.items.len() - 1)
+                                        % shop.items.len();
+                                }
+                                // Right button
+                                if ui.button(egui::RichText::new("▶").size(24.0)).clicked() {
+                                    shop.highlighted = (shop.highlighted + 1) % shop.items.len();
+                                }
+                            });
+                            let current_die = &shop.items[shop.highlighted];
+
+                            ui.label(format!("Cost: {}", current_die.value));
+
+                            ui.separator();
+
+                            // Show die faces
+                            ui.label("Faces:");
+                            for (i, face) in current_die.faces.iter().enumerate() {
+                                let color = match face.rarity {
+                                    Rarity::Common => egui::Color32::WHITE,
+                                    Rarity::Uncommon => egui::Color32::GREEN,
+                                    Rarity::Rare => egui::Color32::BLUE,
+                                    Rarity::Epic => egui::Color32::DARK_BLUE,
+                                    Rarity::Unique => egui::Color32::ORANGE,
+                                };
+
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{}. {}",
+                                        i + 1,
+                                        face.primary_type
+                                    ))
+                                    .color(color),
+                                );
+                            }
+
+                            ui.separator();
+
+                            // Purchase button
+                            let already_purchased = economy.dice.contains(current_die);
+                            let can_purchase =
+                                economy.money >= current_die.value && !already_purchased;
+
+                            if ui
+                                .add_enabled(can_purchase, egui::Button::new("Purchase"))
+                                .clicked()
+                            {
+                                economy.money -= current_die.value;
+                                economy.dice.push(current_die.clone());
+                                ev_die_purchase.send(DiePurchaseEvent(current_die.clone()));
+                            }
+
+                            if already_purchased {
+                                ui.label(
+                                    egui::RichText::new("Already Purchased")
+                                        .color(egui::Color32::YELLOW),
+                                );
+                            } else if !can_purchase {
+                                ui.label(
+                                    egui::RichText::new("Not enough money")
+                                        .color(egui::Color32::RED),
+                                );
+                            }
+                        });
+                });
+
+                if ui
+                    .button(egui::RichText::new("Start Game").size(24.0))
+                    .clicked()
+                {
+                    next_state.set(GamePlayState::Rolling);
+                }
+            });
+        });
 }
 
 fn update_shop_ui(
@@ -229,7 +226,6 @@ fn update_shop_ui(
                     },
                     BackgroundColor(Color::srgba(0.5, 0.0, 0.0, 0.7)),
                     Text::new("Purchased"),
-                    TextColor(WHITE.into()),
                 ));
             });
         }
@@ -245,15 +241,57 @@ fn update_economy_ui(
     }
 }
 
-fn start_rolling(
-    action_state: Res<ActionState<EconomyAction>>,
-    mut next_state: ResMut<NextState<GamePlayState>>,
-    game_resources: Res<GameResources>,
-) {
-    if action_state.just_pressed(&EconomyAction::PlacementPhase) {
-        if game_resources.dice.is_empty() {
-            return;
+// System to rotate the die
+fn spin_die(time: Res<Time>, mut query: Query<(&mut Transform, &SpinningDie)>) {
+    for (mut transform, spinning_die) in query.iter_mut() {
+        transform.rotate_axis(Dir3::Y, spinning_die.rotation_speed * time.delta_secs());
+        transform.rotate_axis(
+            Dir3::X,
+            spinning_die.rotation_speed * 0.5 * time.delta_secs(),
+        );
+    }
+}
+
+// System to update the spinning die when selection changes
+fn update_spinning_die(shop: Res<DieShop>, mut query: Query<(&mut SpinningDie, &mut Transform)>) {
+    if shop.is_changed() {
+        for (mut spinning_die, mut transform) in query.iter_mut() {
+            spinning_die.die_data = shop.items[shop.highlighted].clone();
+            // Reset rotation when changing dies for a cleaner transition
+            transform.rotation = Quat::IDENTITY;
         }
-        next_state.set(GamePlayState::Rolling);
+    }
+}
+
+// System to update die info display
+fn update_die_info(
+    shop: Res<DieShop>,
+    mut query: Query<(&mut DieInfoDisplay, Entity)>,
+    mut commands: Commands,
+) {
+    if shop.is_changed() {
+        for (mut info_display, entity) in query.iter_mut() {
+            info_display.die_index = shop.highlighted;
+
+            // Clear existing children
+            commands.entity(entity).despawn_descendants();
+
+            // Add new info based on highlighted die
+            let die = &shop.items[shop.highlighted];
+
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn(Text::new(format!("Price: {}", die.value)));
+
+                // Add die face info
+                for (i, face) in die.faces.iter().enumerate() {
+                    parent.spawn(Text::new(format!(
+                        "Face {}: {} ({})",
+                        i + 1,
+                        face.primary_type,
+                        face.rarity
+                    )));
+                }
+            });
+        }
     }
 }

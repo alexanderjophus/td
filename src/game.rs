@@ -7,14 +7,13 @@ mod wave;
 
 use super::GameState;
 
-use bevy::gltf::GltfMesh;
+use avian3d::prelude::*;
 use bevy::math::vec2;
 use bevy::prelude::*;
 use bevy::utils::HashMap;
 use bevy::{ecs::system::SystemState, gltf::Gltf, render::primitives::Aabb};
 use bevy_asset_loader::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
-use bevy_rapier3d::prelude::*;
 use camera::CameraPlugin;
 use economy::EconomyPlugin;
 use placement::PlacementPlugin;
@@ -22,9 +21,8 @@ use rand::seq::SliceRandom;
 use rand::{thread_rng, Rng};
 use roll::RollPlugin;
 use std::f32::consts::PI;
-use std::time::Duration;
 use vleue_navigator::prelude::*;
-use wave::{EnemySpawner, WavePlugin};
+use wave::WavePlugin;
 
 const SNAP_OFFSET: f32 = 0.5;
 
@@ -39,6 +37,9 @@ impl Plugin for GamePlugin {
                 PlacementPlugin,
                 RollPlugin,
                 WavePlugin,
+                PhysicsPlugins::default(),
+                #[cfg(feature = "debug")]
+                PhysicsDebugPlugin::default(),
                 RonAssetPlugin::<AssetCollections>::new(&["game.ron"]),
                 VleueNavigatorPlugin,
                 NavmeshUpdaterPlugin::<Aabb, Obstacle>::default(),
@@ -198,8 +199,8 @@ pub struct EnemyDetailsRon {
 
 #[derive(AssetCollection, Resource)]
 pub struct GltfAssets {
-    #[asset(path = "models/house.glb")]
-    pub house: Handle<Gltf>,
+    #[asset(path = "models/dungeon.glb#Scene0")]
+    pub dungeon: Handle<Scene>,
 }
 
 #[derive(serde::Deserialize, Asset, TypePath)]
@@ -307,6 +308,18 @@ enum Rarity {
     Unique,
 }
 
+impl std::fmt::Display for Rarity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Rarity::Common => write!(f, "Common"),
+            Rarity::Uncommon => write!(f, "Uncommon"),
+            Rarity::Rare => write!(f, "Rare"),
+            Rarity::Epic => write!(f, "Epic"),
+            Rarity::Unique => write!(f, "Unique"),
+        }
+    }
+}
+
 #[derive(Event)]
 struct DiePurchaseEvent(Die);
 
@@ -366,15 +379,7 @@ impl DieBuilder {
     }
 }
 
-fn setup(
-    mut commands: Commands,
-    assets_gltfmesh: Res<Assets<GltfMesh>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    assets_enemydetails: Res<Assets<EnemyDetails>>,
-    gltfassets: Res<GltfAssets>,
-    res: Res<Assets<Gltf>>,
-) {
+fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, gltfassets: Res<GltfAssets>) {
     commands.spawn((
         DirectionalLight {
             illuminance: light_consts::lux::OVERCAST_DAY,
@@ -389,35 +394,10 @@ fn setup(
         Name::new("Directional Light"),
     ));
 
-    // get first enemy from assets
-    let enemy = assets_enemydetails.iter().next().unwrap();
-    let enemy_mesh = res.get(&enemy.1.model).unwrap();
-    let enemy_mesh_mesh = assets_gltfmesh.get(&enemy_mesh.meshes[0]).unwrap();
-
     commands.spawn((
-        Mesh3d(enemy_mesh_mesh.primitives[0].mesh.clone()),
-        MeshMaterial3d(enemy_mesh.materials[0].clone()),
-        Transform::from_translation(Vec3::new(0.5, 0.0, -10.0)),
-        EnemySpawner {
-            total_time: Timer::new(Duration::from_secs(20), TimerMode::Once),
-            delta: Timer::new(Duration::from_secs(1), TimerMode::Repeating),
-        },
-        RigidBody::Fixed,
-        Collider::cylinder(10.0, 0.5),
-        Name::new("EnemySpawner"),
-    ));
-
-    let house_mesh = res.get(&gltfassets.house).unwrap();
-    let house_mesh_mats = assets_gltfmesh.get(&house_mesh.meshes[0]).unwrap();
-
-    commands.spawn((
-        Mesh3d(house_mesh_mats.primitives[0].mesh.clone()),
-        MeshMaterial3d(house_mesh.materials[0].clone()),
-        Transform::from_translation(Vec3::new(-5.8, 0.0, -4.0))
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2))
-            .with_scale(Vec3::splat(0.25)),
-        Obstacle,
-        Name::new("House"),
+        SceneRoot(gltfassets.dungeon.clone()),
+        RigidBody::Static,
+        ColliderConstructorHierarchy::new(ColliderConstructor::TrimeshFromMesh),
     ));
 
     // spawn square placeholder for goal
@@ -442,18 +422,8 @@ fn setup(
         },
         // Mark it for update as soon as obstacles are changed.
         // Other modes can be debounced or manually triggered.
-        NavMeshUpdateMode::Direct,
+        NavMeshUpdateMode::Debounced(0.2),
         Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-    ));
-
-    // spawn floor
-    // Create a platform for the die to roll on
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::new(100.0, 0.2, 100.0))),
-        MeshMaterial3d(materials.add(StandardMaterial::default())),
-        Transform::from_xyz(0.0, -0.1, 0.0),
-        Collider::cuboid(50.0, 0.1, 50.0),
-        RigidBody::Fixed,
     ));
 }
 

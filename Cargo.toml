@@ -7,6 +7,9 @@ edition = "2021"
 default = []
 debug = []
 
+[profile.release]
+codegen-units = 1
+
 [dependencies]
 bevy = { version = "0.15", features = ["jpeg"] }
 bevy_asset_loader = { version = "0.22.0", features = [
@@ -21,5 +24,5 @@ serde = "1.0.217"
 anyhow = "1.0.95"
 vleue_navigator = { version = "0.11.1", features = ["debug-with-gizmos"] }
 rand = "0.8.5"
-bevy_rapier3d = "0.29.0"
+avian3d = "0.2"
 uuid = { version = "1.8.0", features = ["v4", "serde"] }
