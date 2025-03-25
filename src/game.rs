@@ -53,7 +53,10 @@ impl Plugin for GamePlugin {
             .add_event::<DieRolledEvent>()
             .add_event::<DieRollResultEvent>()
             .add_systems(OnEnter(GameState::Game), setup)
-            .add_systems(Update, (die_purchased).run_if(in_state(GameState::Game)));
+            .add_systems(
+                Update,
+                (die_purchased, save_die_result).run_if(in_state(GameState::Game)),
+            );
     }
 }
 
@@ -438,5 +441,20 @@ fn die_purchased(
 ) {
     for ev in ev_purchased.read() {
         die_pool.dice.push(ev.0.clone());
+    }
+}
+
+fn save_die_result(
+    mut game_resources: ResMut<GameResources>,
+    mut ev_result: EventReader<DieRollResultEvent>,
+) {
+    for ev in ev_result.read() {
+        for die in game_resources.dice.iter_mut() {
+            if *die == ev.0 {
+                die.result = Some(ev.1);
+                die.rolling = false;
+                break;
+            }
+        }
     }
 }
