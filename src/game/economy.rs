@@ -161,7 +161,6 @@ fn economy_ui(
                                 .clicked()
                             {
                                 economy.money -= current_die.value;
-                                economy.dice.push(current_die.clone());
                                 ev_die_purchase.send(DiePurchaseEvent(current_die.clone()));
                             }
 
